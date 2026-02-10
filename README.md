@@ -43,7 +43,7 @@ npm i
 4. 用 CLI 解码二维码（输出二维码内容 + ASCII 二维码）
 
 ```bash
-node ./bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
+node ./skills/xhs-cli/bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 ```
 
 5. 用小红书 App 扫码完成登录后，导出 cookies
@@ -54,13 +54,15 @@ node ./bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 6. 归一化 cookies 并写入最终文件
 
 ```bash
-node ./bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
-node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 ```
 
 ## CLI 命令一览（Node.js 本地工具）
 
-> 仓库内直接运行：`node ./bin/xhs-skill.mjs ...`
+> 推荐运行（也方便 ClawHub install 用户统一路径）：`node ./skills/xhs-cli/bin/xhs-skill.mjs ...`
+>
+> 备注：仓库根目录也保留了同名入口 `node ./bin/xhs-skill.mjs ...`（仅对 clone 仓库用户有意义）。
 
 - `xhs-skill qr show --in <pngPath>`
   - 从 PNG 截图解码二维码文本
@@ -94,6 +96,10 @@ node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 
 ## Skills 列表（OpenClaw/AgentSkills）
 
+- `skills/xhs-suite/SKILL.md`
+  - ClawHub install 用户推荐入口：告诉你该先装哪些 `xhs-*`，以及各技能的分工
+- `skills/xhs-cli/SKILL.md`
+  - `xhs-*` 技能依赖的本地 CLI（二维码解码、cookies 工具）；适配 ClawHub install 用户
 - `skills/xhs-login-qr/SKILL.md`
   - 获取登录二维码截图（由 `agent-browser` 完成）+ 本地 CLI 解码 + 登录后导出并归一化 cookies
 - `skills/xhs-login-cookies/SKILL.md`
@@ -136,7 +142,10 @@ clawhub login
 ```bash
 cd /Users/leo/github.com/xhs-skill
 
-# 先跑一次（通常会给出要发布/更新的列表，并在必要时交互确认）
+# 先跑一次 dry-run 看将要发布/更新哪些（不依赖 git push，读取的是你本地文件）
+clawhub sync --dry-run
+
+# 再执行实际发布（通常会交互确认）
 clawhub sync
 
 # 确认无误后可用全自动模式
@@ -149,6 +158,13 @@ clawhub sync --all
 cd /Users/leo/github.com/xhs-skill
 clawhub sync --all --bump patch --changelog "更新登录扫码流程与 cookies 工具"
 ```
+
+推荐发布顺序（便于追溯）：
+
+1. `git commit`（先把要发布的变更落到提交）
+2. `clawhub sync --dry-run` 确认发布列表
+3. `clawhub sync --all --bump patch --changelog "..."` 发布到 ClawHub
+4. `git push`（把同一份变更推到 GitHub）
 
 ## License
 

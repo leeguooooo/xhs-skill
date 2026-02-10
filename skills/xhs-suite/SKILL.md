@@ -8,6 +8,14 @@ metadata: {"openclaw":{"emoji":"🧭"}}
 
 ## 快速开始（推荐安装路径）
 
+0. 安装本地 CLI（二维码解码 + cookies 工具，登录/发布/导出会用到）
+
+```bash
+clawhub install xhs-cli
+cd skills/xhs-cli
+npm i
+```
+
 1. 安装登录主流程（大多数人只需要这一个）
 
 ```bash
@@ -49,4 +57,3 @@ clawhub install xhs-export-creator-data
 ## 关键词（便于在 ClawHub 搜索）
 
 小红书、创作者中心、creator.xiaohongshu.com、扫码登录、二维码、QR、cookies、Cookie header、发布笔记、数据导出、agent-browser、OpenClaw、AgentSkills。
-

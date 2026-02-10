@@ -15,27 +15,35 @@ metadata: {"openclaw":{"emoji":"🧰"}}
 clawhub install xhs-suite
 ```
 
+CLI 依赖（ClawHub install 用户必须先装这个）：
+
+```bash
+clawhub install xhs-cli
+cd skills/xhs-cli
+npm i
+```
+
 命令（Node.js）：
 
 - 归一化并写入：
 
 ```bash
 cd {repoRoot}
-node ./bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
 ```
 
 - 查看 cookies 概况：
 
 ```bash
 cd {repoRoot}
-node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 ```
 
 - 输出 `Cookie:` header：
 
 ```bash
 cd {repoRoot}
-node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 ```
 
 注意：

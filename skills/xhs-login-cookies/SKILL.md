@@ -12,6 +12,14 @@ metadata: {"openclaw":{"emoji":"🍪","stage":"login"}}
 clawhub install xhs-suite
 ```
 
+CLI 依赖（ClawHub install 用户必须先装这个）：
+
+```bash
+clawhub install xhs-cli
+cd skills/xhs-cli
+npm i
+```
+
 如果你已经能导出 cookies JSON：
 
 1. 让 `agent-browser` 导出 cookies 到 `data/raw_cookies.json`：
@@ -24,6 +32,6 @@ agent-browser cookies --json > {repoRoot}/data/raw_cookies.json
 
 ```bash
 cd {repoRoot}
-node ./bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
-node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 ```

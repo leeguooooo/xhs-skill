@@ -13,6 +13,14 @@ metadata: {"openclaw":{"emoji":"📷","stage":"login"}}
 clawhub install xhs-suite
 ```
 
+CLI 依赖（ClawHub install 用户必须先装这个）：
+
+```bash
+clawhub install xhs-cli
+cd skills/xhs-cli
+npm i
+```
+
 硬约束：
 
 - 任何网页操作（打开页面/切换扫码登录/截图/复制 cookies）全部委托 `agent-browser` skill。
@@ -31,7 +39,7 @@ clawhub install xhs-suite
 
 ```bash
 cd {repoRoot}
-node ./bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
+node ./skills/xhs-cli/bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 ```
 
 5. 用户用小红书 App 扫码完成登录。
@@ -45,15 +53,15 @@ agent-browser cookies --json > {repoRoot}/data/raw_cookies.json
 
 ```bash
 cd {repoRoot}
-node ./bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
-node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 ```
 
 8. 可选：生成 `Cookie:` header（用于后续 HTTP 调试/接口调用场景）：
 
 ```bash
 cd {repoRoot}
-node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json > ./data/xhs_cookie_header.txt
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json > ./data/xhs_cookie_header.txt
 ```
 
 OpenClaw 输出建议：
@@ -92,7 +100,7 @@ agent-browser --session xhs wait 800
 
 # 截图 + 立即用 CLI 验证是否能解码（解码成功才算拿到对的截图）
 agent-browser --session xhs screenshot ./data/xhs_login_qr.png
-node ./bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
+node ./skills/xhs-cli/bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 ```
 
 ### B. 登录后导出 cookies（不走 DevTools）
@@ -104,8 +112,8 @@ cd {repoRoot}
 agent-browser --session xhs cookies --json > ./data/raw_cookies.json
 
 # 归一化并保存为统一格式
-node ./bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
-node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
+node ./skills/xhs-cli/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 ```
 
 ### C. 二维码解码失败时的低成本重试
@@ -121,5 +129,5 @@ agent-browser --session xhs find text "扫码" click || true
 agent-browser --session xhs wait 800
 agent-browser --session xhs screenshot --full ./data/xhs_login_qr.png
 
-node ./bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
+node ./skills/xhs-cli/bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 ```
