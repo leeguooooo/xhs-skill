@@ -17,7 +17,7 @@ npm i
 
 ## 核心流程（扫码登录 + 保存 cookies）
 
-1. 用 `agent-browser` 打开登录页，截图保存 `data/xhs_login_qr.png`
+1. 用 `agent-browser` 打开登录页 `https://creator.xiaohongshu.com/login`，切到「扫码登录」，截图保存 `data/xhs_login_qr.png`
 2. CLI 显示二维码（ASCII）并输出二维码内容：
 
 ```bash

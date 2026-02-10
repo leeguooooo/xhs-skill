@@ -18,18 +18,19 @@ metadata: {"openclaw":{"emoji":"📷","stage":"login"}}
 
 流程：
 
-1. 让 `agent-browser` 打开小红书创作者中心登录页，并切到「扫码登录」二维码可见状态。
-2. 让 `agent-browser` 对当前页面做截图，保存到：`{repoRoot}/data/xhs_login_qr.png`（要求 PNG）。
-3. 在本地终端执行（显示二维码 ASCII + 输出二维码内容字符串）：
+1. 让 `agent-browser` 打开小红书创作者中心登录页 `https://creator.xiaohongshu.com/login`。
+2. 如果页面默认展示的是「手机号/验证码登录」，点击页面上的「扫码」切换到「扫码登录」，确保二维码区域可见。
+3. 让 `agent-browser` 对当前页面做截图，保存到：`{repoRoot}/data/xhs_login_qr.png`（要求 PNG）。
+4. 在本地终端执行（显示二维码 ASCII + 输出二维码内容字符串）：
 
 ```bash
 cd {repoRoot}
 node ./bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 ```
 
-4. 用户用小红书 App 扫码完成登录。
-5. 登录成功后，让 `agent-browser` 导出 cookies（优先导出 JSON 数组；如果只能导出对象也可以）。保存到：`{repoRoot}/data/raw_cookies.json`。
-6. 归一化并保存最终 cookies：
+5. 用户用小红书 App 扫码完成登录。
+6. 登录成功后，让 `agent-browser` 导出 cookies（优先导出 JSON 数组；如果只能导出对象也可以）。保存到：`{repoRoot}/data/raw_cookies.json`。
+7. 归一化并保存最终 cookies：
 
 ```bash
 cd {repoRoot}
@@ -37,7 +38,7 @@ node ./bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./
 node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 ```
 
-7. 可选：生成 `Cookie:` header（用于后续 HTTP 调试/接口调用场景）：
+8. 可选：生成 `Cookie:` header（用于后续 HTTP 调试/接口调用场景）：
 
 ```bash
 cd {repoRoot}
