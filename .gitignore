@@ -1,0 +1,17 @@
+# Node
+node_modules/
+
+# OS
+.DS_Store
+
+# Secrets / data
+.env
+/data/*.json
+/data/*.csv
+/data/*.xlsx
+/data/*.txt
+/data/*.png
+/data/exports/
+
+# Temporary
+*.log

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "xhs-skill",
+  "version": "0.1.1",
+  "description": "Xiaohongshu skills pack (skill-first; Node.js CLI helpers; browser automation delegated to agent-browser).",
+  "skills": ["skills"],
+  "metadata": {
+    "license": "MIT"
+  }
+}
