@@ -8,7 +8,12 @@ metadata: {"openclaw":{"emoji":"🍪","stage":"login"}}
 
 如果你已经能导出 cookies JSON：
 
-1. 让 `agent-browser` 导出 cookies 到 `data/raw_cookies.json`
+1. 让 `agent-browser` 导出 cookies 到 `data/raw_cookies.json`：
+
+```bash
+agent-browser cookies --json > {repoRoot}/data/raw_cookies.json
+```
+
 2. 在本地归一化并写入 `data/xhs_cookies.json`：
 
 ```bash

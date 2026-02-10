@@ -113,6 +113,43 @@ node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 - `docs/`: 规范与设计说明
 - `test/`: Node.js 单元测试（`node --test`）
 
+## 发布到 ClawHub（上传技能，便于检索与安装）
+
+> 注意：ClawHub 上的技能是公开可见的。上传前请确认 `skills/` 下不包含任何 cookies、token、账号信息或私密业务数据。
+
+1. 安装 ClawHub CLI
+
+```bash
+npm i -g clawhub
+# 或
+pnpm add -g clawhub
+```
+
+2. 登录
+
+```bash
+clawhub login
+```
+
+3. 批量同步本仓库所有技能（推荐）
+
+```bash
+cd /Users/leo/github.com/xhs-skill
+
+# 先跑一次（通常会给出要发布/更新的列表，并在必要时交互确认）
+clawhub sync
+
+# 确认无误后可用全自动模式
+clawhub sync --all
+```
+
+4. 更新发布（带版本 bump 与 changelog，适合 CI 或批量更新）
+
+```bash
+cd /Users/leo/github.com/xhs-skill
+clawhub sync --all --bump patch --changelog "更新登录扫码流程与 cookies 工具"
+```
+
 ## License
 
 MIT，见 `LICENSE`。
