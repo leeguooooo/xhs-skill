@@ -40,6 +40,30 @@ clawhub install xhs-publish-note
 clawhub install xhs-export-creator-data
 ```
 
+## 一键安装（可选）
+
+最小可用（登录拿 cookies）：
+
+```bash
+printf '%s\n' xhs-cli xhs-login-qr | xargs -n1 clawhub install
+cd skills/xhs-cli && npm i
+```
+
+全套安装（把所有 xhs-* 都装上，避免漏装）：
+
+```bash
+printf '%s\n' \
+  xhs-cli \
+  xhs-login-qr \
+  xhs-login-cookies \
+  xhs-cookie-utils \
+  xhs-publish-note \
+  xhs-export-creator-data \
+| xargs -n1 clawhub install
+
+cd skills/xhs-cli && npm i
+```
+
 ## 技能说明（如何选）
 
 - `xhs-login-qr`
