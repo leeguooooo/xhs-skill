@@ -43,7 +43,7 @@ npm i
 4. 用 CLI 解码二维码（输出二维码内容 + ASCII 二维码）
 
 ```bash
-node ./skills/xhs-cli/bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
+node ./skills/xhs-skill/bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 ```
 
 5. 用小红书 App 扫码完成登录后，导出 cookies
@@ -54,13 +54,13 @@ node ./skills/xhs-cli/bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 6. 归一化 cookies 并写入最终文件
 
 ```bash
-node ./skills/xhs-cli/bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
-node ./skills/xhs-cli/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
+node ./skills/xhs-skill/bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
+node ./skills/xhs-skill/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 ```
 
 ## CLI 命令一览（Node.js 本地工具）
 
-> 推荐运行（也方便 ClawHub install 用户统一路径）：`node ./skills/xhs-cli/bin/xhs-skill.mjs ...`
+> 推荐运行（也方便 ClawHub install 用户统一路径）：`node ./skills/xhs-skill/bin/xhs-skill.mjs ...`
 >
 > 备注：仓库根目录也保留了同名入口 `node ./bin/xhs-skill.mjs ...`（仅对 clone 仓库用户有意义）。
 
@@ -96,20 +96,8 @@ node ./skills/xhs-cli/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.j
 
 ## Skills 列表（OpenClaw/AgentSkills）
 
-- `skills/xhs-suite/SKILL.md`
-  - ClawHub install 用户推荐入口：告诉你该先装哪些 `xhs-*`，以及各技能的分工
-- `skills/xhs-cli/SKILL.md`
-  - `xhs-*` 技能依赖的本地 CLI（二维码解码、cookies 工具）；适配 ClawHub install 用户
-- `skills/xhs-login-qr/SKILL.md`
-  - 获取登录二维码截图（由 `agent-browser` 完成）+ 本地 CLI 解码 + 登录后导出并归一化 cookies
-- `skills/xhs-login-cookies/SKILL.md`
-  - 已有 cookies 导出时，直接归一化并保存
-- `skills/xhs-cookie-utils/SKILL.md`
-  - cookies 归一化、概况查看、生成 `Cookie:` header
-- `skills/xhs-publish-note/SKILL.md`
-  - 发布图文/视频笔记（浏览器交互委托 `agent-browser`；本仓库只提供流程与校验点）
-- `skills/xhs-export-creator-data/SKILL.md`
-  - 从创作者中心导出数据（优先导出 CSV/XLSX，或截图留存），产物落地 `data/exports/<YYYY-MM-DD>/`
+- `skills/xhs-skill/SKILL.md`
+  - 单一入口技能（登录拿 cookies、发布笔记、导出数据；浏览器交互委托 agent-browser；附带本地 CLI）
 
 ## 目录结构
 
