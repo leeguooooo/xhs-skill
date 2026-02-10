@@ -77,7 +77,16 @@ export function normalizeCookieObject(c) {
 export function normalizeCookiesPayload(input) {
   let cookiesRaw = input;
   if (input && typeof input === 'object' && !Array.isArray(input)) {
-    if (Array.isArray(input.cookies)) cookiesRaw = input.cookies;
+    // Supported shapes:
+    // - [...]
+    // - { cookies: [...] }
+    // - { data: { cookies: [...] } } (agent-browser --json)
+    // - { success: true, data: { cookies: [...] }, error: null } (agent-browser --json)
+    if (Array.isArray(input.cookies)) {
+      cookiesRaw = input.cookies;
+    } else if (input.data && typeof input.data === 'object' && Array.isArray(input.data.cookies)) {
+      cookiesRaw = input.data.cookies;
+    }
   }
 
   if (!Array.isArray(cookiesRaw)) {
