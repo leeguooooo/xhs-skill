@@ -6,6 +6,12 @@ metadata: {"openclaw":{"emoji":"📊"}}
 
 目标：把创作者中心关键数据导出到 `data/exports/<YYYY-MM-DD>/`，用于后续分析。
 
+相关技能（安装导航）：
+
+```bash
+clawhub install xhs-suite
+```
+
 步骤：
 
 1. 确认已登录（必要时先 `/xhs-login-cookies`）。

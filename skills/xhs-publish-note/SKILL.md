@@ -11,6 +11,12 @@ metadata: {"openclaw":{"emoji":"📝"}}
 - 话题（可选）
 - 图片/视频路径（本机绝对路径优先）
 
+相关技能（安装导航）：
+
+```bash
+clawhub install xhs-suite
+```
+
 流程：
 
 1. 要求用户先完成 `/xhs-login-cookies`，否则先走登录。

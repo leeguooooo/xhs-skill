@@ -7,6 +7,12 @@ metadata: {"openclaw":{"emoji":"📷","stage":"login"}}
 
 目标：避免重复登录。用一次扫码登录拿到长期可复用的 cookies，并落地保存。
 
+相关技能（安装导航）：
+
+```bash
+clawhub install xhs-suite
+```
+
 硬约束：
 
 - 任何网页操作（打开页面/切换扫码登录/截图/复制 cookies）全部委托 `agent-browser` skill。

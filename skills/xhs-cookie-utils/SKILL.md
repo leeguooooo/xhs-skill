@@ -9,6 +9,12 @@ metadata: {"openclaw":{"emoji":"🧰"}}
 - cookies JSON 导出格式归一化（支持数组或 `{cookies:[...]}`）
 - cookies JSON -> `Cookie:` header 字符串（用于部分 HTTP 调试场景）
 
+相关技能（安装导航）：
+
+```bash
+clawhub install xhs-suite
+```
+
 命令（Node.js）：
 
 - 归一化并写入：

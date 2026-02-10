@@ -6,6 +6,12 @@ metadata: {"openclaw":{"emoji":"🍪","stage":"login"}}
 
 推荐直接使用 `/xhs-login-qr`（包含二维码获取与 CLI 展示）。
 
+相关技能（安装导航）：
+
+```bash
+clawhub install xhs-suite
+```
+
 如果你已经能导出 cookies JSON：
 
 1. 让 `agent-browser` 导出 cookies 到 `data/raw_cookies.json`：
