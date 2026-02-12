@@ -86,6 +86,21 @@ node ./bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./
 node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 ```
 
+5.1 推荐用脚本做后验校验（可执行门禁）：
+
+```bash
+# 例：先让 agent-browser 记录当前 URL 与后台探测后的 URL
+CURRENT_URL="$(agent-browser get url)"
+agent-browser open https://creator.xiaohongshu.com/creator/home
+PROBE_FINAL_URL="$(agent-browser get url)"
+
+node ./scripts/verify_login.mjs \
+  --cookies ./data/xhs_cookies.json \
+  --current-url "$CURRENT_URL" \
+  --probe-final-url "$PROBE_FINAL_URL" \
+  --json
+```
+
 登录成功判定（强制）：
 
 - 必须同时满足以下 3 条才可回报“登录完成”：
@@ -93,6 +108,27 @@ node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 - 可访问创作者后台页面，且不会 401/回跳登录
 - cookies 中存在 `web_session`
 - 任一条件不满足，必须回报“登录失败/未完成”，并重试登录流程；禁止误报成功。
+
+登录结果输出契约（JSON）：
+
+```json
+{
+  "task": "xhs_login",
+  "ok": true,
+  "checks": {
+    "left_login": true,
+    "backend_not_rejected": true,
+    "has_web_session": true
+  },
+  "artifacts": {
+    "qr_png": "data/xhs_login_qr.png",
+    "raw_cookies": "data/raw_cookies.json",
+    "normalized_cookies": "data/xhs_cookies.json"
+  }
+}
+```
+
+失败时 `ok=false`，并给出失败项（例如缺 `web_session`），禁止输出“已完成”。
 
 6. （可选）生成 `Cookie:` header：
 
@@ -137,6 +173,22 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 - 每次点击/填写前先刷新 ref，避免 ref 漂移误操作
 5. 点击“发布/提交”前暂停，要求用户确认最终预览。
 6. 发布后记录结果页 URL；失败时截图并记录错误文案。
+
+发布结果输出契约（JSON）：
+
+```json
+{
+  "task": "xhs_publish",
+  "ok": true,
+  "result_url": "https://creator.xiaohongshu.com/....",
+  "artifacts": {
+    "media_inputs": ["..."],
+    "error_screenshot": null
+  }
+}
+```
+
+发布失败时 `ok=false`，并返回 `error_message` 与 `error_screenshot` 路径。
 
 ## C. 导出创作者中心数据（CSV/XLSX 或截图）
 

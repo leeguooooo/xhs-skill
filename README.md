@@ -4,6 +4,8 @@
 
 关键词（便于 SEO 与 AI 搜索）：小红书、创作者中心、creator.xiaohongshu.com、扫码登录、二维码、QR code、cookies 导出、cookies 归一化、Cookie header、OpenClaw、AgentSkills、agent-browser、Node.js CLI、工作流、技能包。
 
+当前推荐版本：`xhs-skill@1.0.2`
+
 ## 你能用它做什么
 
 - 扫码登录小红书创作者中心（`https://creator.xiaohongshu.com/login`），把二维码截图转成可复制的文本并在终端打印 ASCII 二维码
@@ -23,6 +25,15 @@
 
 - Node.js >= 18
 - 已安装依赖：`npm i`
+
+如果你通过 OpenClaw 使用技能（推荐）：
+
+```bash
+# 注意：OpenClaw 通常从 ~/.codex/skills 加载技能，不是 ~/clawd/skills
+npx -y clawhub@latest --workdir ~/.codex --dir skills install xhs-skill --force --version 1.0.2
+cd ~/.codex/skills/xhs-skill
+npm i
+```
 
 1. 安装依赖
 
@@ -56,6 +67,20 @@ node ./skills/xhs-skill/bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 ```bash
 node ./skills/xhs-skill/bin/xhs-skill.mjs cookies normalize --in ./data/raw_cookies.json --out ./data/xhs_cookies.json
 node ./skills/xhs-skill/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
+```
+
+7. 推荐执行登录后验校验脚本（门禁）
+
+```bash
+CURRENT_URL="$(agent-browser get url)"
+agent-browser open https://creator.xiaohongshu.com/creator/home
+PROBE_FINAL_URL="$(agent-browser get url)"
+
+node ./skills/xhs-skill/scripts/verify_login.mjs \
+  --cookies ./data/xhs_cookies.json \
+  --current-url "$CURRENT_URL" \
+  --probe-final-url "$PROBE_FINAL_URL" \
+  --json
 ```
 
 ## CLI 命令一览（Node.js 本地工具）
@@ -96,6 +121,29 @@ node ./skills/xhs-skill/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies
 - cookies 解析失败（`Unsupported cookies JSON` / `No cookies parsed`）
   - 先确认导出文件内容是 JSON
   - 优先导出“cookies 数组”；如果工具导出的是对象，请确保结构里有 `cookies` 字段
+
+## OpenClaw/WhatsApp 关键约束（强烈建议）
+
+- 扫码不等于登录成功，必须做后验校验。
+- 登录成功标准必须同时满足：
+  - 已离开 `/login`
+  - 能访问后台页且不 401/不回跳登录
+  - cookies 中包含 `web_session`
+- 同一 `agent-browser` session 禁止并发操作，避免 `os error 35` 假失败。
+- 关键动作前后都要重抓 `snapshot -i`，并用 `placeholder/role/text` 二次定位，避免 ref 漂移。
+- WhatsApp 通道通常不能直接发送本地图片路径；二维码必须回传 `qr_text + ASCII`，不要只发 `data/*.png`。
+
+## 结果契约（建议统一）
+
+- 登录结果建议用 JSON 回传：`ok` + 三项校验（`left_login` / `backend_not_rejected` / `has_web_session`）+ 产物路径
+- 发布结果建议用 JSON 回传：`ok` + `result_url` + 失败时 `error_message/error_screenshot`
+- 禁止“口头成功”但缺少结构化结果
+
+## 发布笔记注意点（高频坑）
+
+- 标题长度：必须 `<= 20` 字，超限先裁剪或改写。
+- 正文输入：编辑器通常是 `ProseMirror`，不要按普通 `input/textarea` 处理。
+- 发布前：必须设置人工确认点，用户确认预览后再点“发布/提交”。
 
 ## Skills 列表（OpenClaw/AgentSkills）
 
