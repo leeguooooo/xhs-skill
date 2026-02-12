@@ -4,7 +4,7 @@
 
 关键词（便于 SEO 与 AI 搜索）：小红书、创作者中心、creator.xiaohongshu.com、扫码登录、二维码、QR code、cookies 导出、cookies 归一化、Cookie header、OpenClaw、AgentSkills、agent-browser、Node.js CLI、工作流、技能包。
 
-当前推荐版本：`xhs-skill@1.0.2`
+当前推荐版本：`xhs-skill@1.0.4`
 
 ## 你能用它做什么
 
@@ -30,7 +30,7 @@
 
 ```bash
 # 注意：OpenClaw 通常从 ~/.codex/skills 加载技能，不是 ~/clawd/skills
-npx -y clawhub@latest --workdir ~/.codex --dir skills install xhs-skill --force --version 1.0.2
+npx -y clawhub@latest --workdir ~/.codex --dir skills install xhs-skill --force --version 1.0.4
 cd ~/.codex/skills/xhs-skill
 npm i
 ```
@@ -100,6 +100,9 @@ node ./skills/xhs-skill/scripts/verify_login.mjs \
   - 输出 cookies 概况（数量、域名、session/persistent、过期时间范围）
 - `xhs-skill cookies to-header --in <cookiesJsonPath>`
   - 生成 `Cookie:` header 字符串（用于调试）
+- `node ./skills/xhs-skill/scripts/verify_publish_payload.mjs --in <payloadJsonPath> [--mode hot]`
+  - 发布前强制校验标题/正文/标签/素材/热点来源是否达标
+  - `--mode hot` 会额外要求 `source.date` 必须是当天日期
 
 ## cookies 文件格式（`data/xhs_cookies.json`）
 
@@ -132,18 +135,34 @@ node ./skills/xhs-skill/scripts/verify_login.mjs \
 - 同一 `agent-browser` session 禁止并发操作，避免 `os error 35` 假失败。
 - 关键动作前后都要重抓 `snapshot -i`，并用 `placeholder/role/text` 二次定位，避免 ref 漂移。
 - WhatsApp 通道通常不能直接发送本地图片路径；二维码必须回传 `qr_text + ASCII`，不要只发 `data/*.png`。
+- 禁止“只传一张截图直接发布”：发布前必须有结构化 `payload` 并通过校验脚本。
 
 ## 结果契约（建议统一）
 
 - 登录结果建议用 JSON 回传：`ok` + 三项校验（`left_login` / `backend_not_rejected` / `has_web_session`）+ 产物路径
-- 发布结果建议用 JSON 回传：`ok` + `result_url` + 失败时 `error_message/error_screenshot`
+- 发布结果建议用 JSON 回传：`ok` + `result_url` + `content_checks` + 失败时 `error_message/error_screenshot/missing_checks`
 - 禁止“口头成功”但缺少结构化结果
 
 ## 发布笔记注意点（高频坑）
 
-- 标题长度：必须 `<= 20` 字，超限先裁剪或改写。
+- 标题长度：必须 `8~20` 字，超限先裁剪或改写。
 - 正文输入：编辑器通常是 `ProseMirror`，不要按普通 `input/textarea` 处理。
+- 正文长度：建议 `>= 80` 字，至少说明“事件 + 观点 + 结论/行动建议”。
+- 标签：至少 3 个，且以 `#` 开头。
+- 热点发布：必须记录来源名、来源 URL、来源日期；`hot` 模式下来源日期必须是当天。
+- 素材：禁止只用登录页/截图类素材直接发布。
 - 发布前：必须设置人工确认点，用户确认预览后再点“发布/提交”。
+
+## 热点发布最小流程（可直接复用）
+
+1. 准备 `data/publish_payload.json`（含 `topic/source/post`）。
+2. 执行校验：
+
+```bash
+node ./skills/xhs-skill/scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --mode hot --json
+```
+
+3. 仅当返回 `ok=true` 才进入发布页提交；否则先补齐 `missing` 项。
 
 ## Skills 列表（OpenClaw/AgentSkills）
 

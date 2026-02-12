@@ -146,10 +146,45 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 输入（用户提供）：
 
 - 笔记类型：图文 或 视频
-- 标题、正文
-- 话题（可选）
+- 标题、正文、标签（必填）
+- 话题（必填；做热点发布时必须是“今天热点”）
 - 图片/视频路径（本机绝对路径优先）
 - 图标/配图需求（可选）：关键词、风格（扁平/拟物/线性）、主色、是否透明背景
+- 热点来源（必填）：来源名、来源 URL、来源日期（`YYYY-MM-DD`）
+
+发布硬门禁（强制）：
+
+1. 先把发布素材整理为 `data/publish_payload.json`（示例）：
+
+```json
+{
+  "topic": "今日热点：xxxx",
+  "source": {
+    "name": "央视新闻",
+    "url": "https://example.com/news",
+    "date": "2026-02-12"
+  },
+  "post": {
+    "title": "20字内标题示例",
+    "body": "不少于 80 字的正文......",
+    "tags": ["#热点", "#今日新闻", "#小红书运营"],
+    "media": ["/abs/path/cover.png", "/abs/path/card_1.png"]
+  }
+}
+```
+
+2. 发布前必须执行校验脚本：
+
+```bash
+# 普通模式
+node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --json
+
+# 今天热点模式（强制 source.date = 今天）
+node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --mode hot --json
+```
+
+3. 只有当校验结果 `ok=true` 才允许进入发布页点击“发布/提交”。
+4. 任一校验失败必须中止流程并提示补齐，禁止“只传截图直接发”。
 
 素材准备（可选，省去用户自己找图标/配图）：
 
@@ -165,14 +200,18 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 流程（浏览器侧全部由 `agent-browser` 完成）：
 
 1. 确保已登录（先完成上面的 A，或已有有效登录态）。
-2. 打开发布页面（允许路径变化）。
-3. 上传媒体（图文多图/视频文件与封面）。
-4. 填写标题/正文/话题：
-- 标题必须 `<= 20` 字（超限先裁剪或提示用户改短）
+2. 准备并校验 `data/publish_payload.json`（必须 `ok=true`）。
+3. 打开发布页面（允许路径变化）。
+4. 上传媒体（图文多图/视频文件与封面）。
+5. 填写标题/正文/话题/标签：
+- 标题必须 `8~20` 字（超过 20 字先裁剪或提示用户改短）
+- 正文必须 `>= 80` 字
+- 标签至少 3 个，且都以 `#` 开头
+- 禁止“仅截图素材”直接发布（如只含 `screenshot/login_qr` 等截图文件）
 - 正文编辑区按 `ProseMirror` 处理，不要按普通 input 假设
 - 每次点击/填写前先刷新 ref，避免 ref 漂移误操作
-5. 点击“发布/提交”前暂停，要求用户确认最终预览。
-6. 发布后记录结果页 URL；失败时截图并记录错误文案。
+6. 点击“发布/提交”前暂停，要求用户确认最终预览。
+7. 发布后记录结果页 URL；失败时截图并记录错误文案。
 
 发布结果输出契约（JSON）：
 
@@ -181,14 +220,22 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
   "task": "xhs_publish",
   "ok": true,
   "result_url": "https://creator.xiaohongshu.com/....",
+  "content_checks": {
+    "title_len": 18,
+    "body_len": 136,
+    "tag_count": 3,
+    "topic": "今日热点：xxxx",
+    "source_date": "2026-02-12"
+  },
   "artifacts": {
+    "payload_json": "data/publish_payload.json",
     "media_inputs": ["..."],
     "error_screenshot": null
   }
 }
 ```
 
-发布失败时 `ok=false`，并返回 `error_message` 与 `error_screenshot` 路径。
+发布失败时 `ok=false`，并返回 `error_message`、`error_screenshot` 路径和未通过的 `missing_checks`。
 
 ## C. 导出创作者中心数据（CSV/XLSX 或截图）
 
@@ -209,3 +256,4 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 - `node ./bin/xhs-skill.mjs cookies normalize --in <jsonPath> --out <outPath>`
 - `node ./bin/xhs-skill.mjs cookies status --in <cookiesJsonPath>`
 - `node ./bin/xhs-skill.mjs cookies to-header --in <cookiesJsonPath>`
+- `node ./scripts/verify_publish_payload.mjs --in <payloadJsonPath> [--mode hot]`
