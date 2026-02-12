@@ -90,6 +90,9 @@ node ./skills/xhs-skill/bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies
   - 原因 1：截图不是二维码视图（仍在手机号登录页），先点「扫码」再截图
   - 原因 2：截图尺寸过小或模糊，让 `agent-browser` 放大二维码区域再截图
   - 原因 3：图片不是 PNG，当前解码仅支持 PNG
+- OpenClaw 只返回了二维码文件路径，没有把二维码发出来
+  - 这不算完成登录引导。需要执行 `node ./skills/xhs-skill/bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png`
+  - 把命令输出中的 `qr_text` 与 ASCII 二维码直接回传给用户（可选再附图片）
 - cookies 解析失败（`Unsupported cookies JSON` / `No cookies parsed`）
   - 先确认导出文件内容是 JSON
   - 优先导出“cookies 数组”；如果工具导出的是对象，请确保结构里有 `cookies` 字段

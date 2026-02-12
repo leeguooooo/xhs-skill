@@ -52,6 +52,21 @@ mkdir -p data
 node ./bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png
 ```
 
+OpenClaw 回传规范（强制）：
+
+- 禁止只回传文件路径（例如仅说 `data/xhs_login_qr.png`）。
+- 必须先执行 `node ./bin/xhs-skill.mjs qr show --in ./data/xhs_login_qr.png`，然后把输出的二维码文本 + ASCII 二维码直接发给用户。
+- 若会话支持图片渲染，再附上二维码截图绝对路径（或图片附件）作为补充。
+- 发完二维码后必须暂停，等待用户确认“已扫码”再继续 cookies 导出。
+
+推荐回传模板：
+
+```text
+请用小红书 App 扫这个二维码登录。
+二维码文本: <qr_text>
+<ASCII QR>
+```
+
 4. 用小红书 App 扫码完成登录后，导出 cookies 到 `data/raw_cookies.json`（不走 DevTools）：
 
 ```bash
@@ -125,4 +140,3 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 - `node ./bin/xhs-skill.mjs cookies normalize --in <jsonPath> --out <outPath>`
 - `node ./bin/xhs-skill.mjs cookies status --in <cookiesJsonPath>`
 - `node ./bin/xhs-skill.mjs cookies to-header --in <cookiesJsonPath>`
-
