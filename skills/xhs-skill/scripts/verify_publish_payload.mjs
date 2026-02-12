@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { readFile } from 'node:fs/promises';
+import { getImageSize } from '../lib/image.mjs';
 
 function usage() {
   return `verify_publish_payload
@@ -62,7 +63,55 @@ function pickArray(v) {
   return Array.isArray(v) ? v : [];
 }
 
-function buildChecks(payload, mode) {
+function hasEscapedNewlineTokens(body) {
+  // Detect literal "\n" (two chars) and standalone "/n" token (common typo).
+  const s = String(body || '');
+  if (s.includes('\\n')) return true;
+  return /(^|\s)\/n(\s|$)/.test(s);
+}
+
+function isImagePath(p) {
+  const s = String(p || '').toLowerCase();
+  return s.endsWith('.png') || s.endsWith('.jpg') || s.endsWith('.jpeg');
+}
+
+async function checkMediaDims(media) {
+  const images = media.filter(isImagePath);
+  const results = [];
+  for (const p of images) {
+    try {
+      const { width, height, format } = await getImageSize(p);
+      const ratio = width / height;
+      results.push({ path: p, ok: true, width, height, ratio, format });
+    } catch (e) {
+      results.push({ path: p, ok: false, error: e?.message || String(e) });
+    }
+  }
+
+  // Strict-ish: expect portrait 3:4 assets for XHS cards (prefer 1242x1660).
+  const ratioTarget = 3 / 4;
+  const ratioTol = 0.02;
+  const bad = results.filter((r) => r.ok && Math.abs(r.ratio - ratioTarget) > ratioTol);
+  const parseFailed = results.filter((r) => !r.ok);
+
+  const hasAny = images.length > 0;
+  const ok = !hasAny || (bad.length === 0 && parseFailed.length === 0);
+
+  const perfect = results.filter((r) => r.ok && r.width === 1242 && r.height === 1660);
+  return {
+    ok,
+    value: {
+      checked_images: images.length,
+      passed: results.filter((r) => r.ok).length,
+      parse_failed: parseFailed.length,
+      ratio_bad: bad.length,
+      perfect_1242x1660: perfect.length,
+      details: results.slice(0, 12), // keep output bounded
+    },
+  };
+}
+
+async function buildChecks(payload, mode) {
   const topic = str(payload?.topic);
   const sourceName = str(payload?.source?.name);
   const sourceUrl = str(payload?.source?.url);
@@ -78,6 +127,8 @@ function buildChecks(payload, mode) {
   const bodyLen = [...body].length;
   const screenshotOnly = media.length > 0 && media.every((x) => isScreenshotLike(x));
   const hotMode = mode === 'hot';
+  const hasEscapedNewlines = hasEscapedNewlineTokens(body);
+  const mediaDims = await checkMediaDims(media);
 
   const checks = {
     has_topic: {
@@ -96,6 +147,10 @@ function buildChecks(payload, mode) {
       ok: bodyLen >= 80,
       value: { length: bodyLen },
     },
+    body_newline_normalized: {
+      ok: !hasEscapedNewlines,
+      value: hasEscapedNewlines ? 'Found literal \\\\n or standalone /n token' : null,
+    },
     tags_ok: {
       ok: tags.length >= 3,
       value: { count: tags.length, tags },
@@ -104,6 +159,7 @@ function buildChecks(payload, mode) {
       ok: media.length >= 1 && !screenshotOnly,
       value: { count: media.length, screenshot_only: screenshotOnly, media },
     },
+    media_dim_ok: mediaDims,
     hot_source_is_today: {
       ok: !hotMode || sourceDate === todayISO(),
       value: { required_date: hotMode ? todayISO() : null, source_date: sourceDate || null },
@@ -137,7 +193,7 @@ async function main(argv) {
   const raw = await readFile(values.in, 'utf8');
   const payload = JSON.parse(raw);
   const mode = str(values.mode || 'normal').toLowerCase();
-  const checks = buildChecks(payload, mode);
+  const checks = await buildChecks(payload, mode);
 
   const missing = Object.entries(checks)
     .filter(([, item]) => !item.ok)
