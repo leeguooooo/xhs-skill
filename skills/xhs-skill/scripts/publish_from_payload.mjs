@@ -270,6 +270,66 @@ function jsReadback() {
 `.trim();
 }
 
+function jsSelectBestFileInput({ expectMultiple }) {
+  const m = expectMultiple ? 'true' : 'false';
+  return `
+(() => {
+  const expectMultiple = ${m};
+  const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+  if (!inputs.length) return JSON.stringify({ ok: false, error: 'No input[type=file] found' });
+
+  const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const norm = (s) => String(s || '').toLowerCase();
+
+  let best = null;
+  let bestScore = -1e9;
+  let bestIndex = -1;
+
+  for (let i = 0; i < inputs.length; i++) {
+    const el = inputs[i];
+    if (!el) continue;
+    const accept = norm(el.accept);
+    const disabled = !!el.disabled;
+    const multi = !!el.multiple;
+    const vis = visible(el);
+
+    let score = 0;
+    if (!disabled) score += 5;
+    if (accept.includes('image') || accept.includes('png') || accept.includes('jpg') || accept.includes('jpeg')) score += 4;
+    if (accept.includes('video') || accept.includes('mp4') || accept.includes('mov')) score -= 8;
+    if (expectMultiple && multi) score += 3;
+    if (expectMultiple && !multi) score -= 2;
+    if (!expectMultiple && !multi) score += 1;
+    if (vis) score += 1;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = el;
+      bestIndex = i;
+    }
+  }
+
+  if (!best) return JSON.stringify({ ok: false, error: 'No suitable file input found' });
+
+  // Tag it so agent-browser upload can target it reliably.
+  best.id = 'xhs_skill_upload_input';
+  best.setAttribute('data-xhs-skill', 'upload');
+
+  return JSON.stringify({
+    ok: true,
+    count: inputs.length,
+    chosen: {
+      index: bestIndex,
+      accept: best.accept || '',
+      multiple: !!best.multiple,
+      disabled: !!best.disabled,
+      visible: ${'!!(best.offsetWidth || best.offsetHeight || best.getClientRects().length)'}
+    }
+  });
+})()
+`.trim();
+}
+
 async function main(argv) {
   const { values } = parseArgs({
     args: argv,
@@ -361,15 +421,23 @@ async function main(argv) {
   if (media.length === 0) {
     throw new Error('No media in payload. Refuse to publish without images/videos.');
   }
-  // agent-browser upload requires a @ref. We'll take a snapshot and pick the best upload-related control.
-  const snap = await ab(session, ['snapshot', '-i', '--json']);
-  const snapJson = parseFirstJsonObject(snap.stdout);
-  const refs = snapJson ? extractRefsFromSnapshotJson(snapJson) : [];
-  const uploadRef = pickBestUploadRef(refs) || (refs[0] ? refs[0].ref : null);
-  if (!uploadRef) {
-    throw new Error('Could not locate an upload target ref from snapshot. Abort to avoid mis-click.');
+
+  // Prefer uploading through an actual <input type="file"> (uploading to a button ref will fail).
+  // We first select the best candidate input and tag it with a stable id.
+  const sel = await ab(session, ['eval', jsSelectBestFileInput({ expectMultiple: media.length > 1 })], { allowFail: true });
+  const selJson = parseFirstJsonObject(sel.stdout) || {};
+  if (selJson.ok) {
+    await ab(session, ['upload', '#xhs_skill_upload_input', ...media]);
+  } else {
+    // Fallback: try generic selector (agent-browser supports CSS selectors here).
+    const r = await ab(session, ['upload', 'input[type=file]', ...media], { allowFail: true });
+    if (r.code !== 0) {
+      throw new Error(
+        `Upload failed: no usable input[type=file]. selector_error=${selJson.error || 'unknown'}`
+      );
+    }
   }
-  await ab(session, ['upload', uploadRef, ...media]);
+
   await ab(session, ['wait', '--load', 'networkidle']);
   await ab(session, ['wait', Math.min(15000, 1000 * Math.max(2, media.length * 2))]);
 
