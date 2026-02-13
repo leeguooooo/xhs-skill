@@ -63,11 +63,24 @@ function pickArray(v) {
   return Array.isArray(v) ? v : [];
 }
 
-function hasEscapedNewlineTokens(body) {
-  // Detect literal "\n" (two chars) and standalone "/n" token (common typo).
+function hasLiteralBackslashN(body) {
   const s = String(body || '');
-  if (s.includes('\\n')) return true;
+  return s.includes('\\n');
+}
+
+function hasSlashNToken(body) {
+  const s = String(body || '');
   return /(^|\s)\/n(\s|$)/.test(s);
+}
+
+function containsLinkLike(text) {
+  const s = String(text || '').trim();
+  if (!s) return false;
+  if (/https?:\/\//i.test(s)) return true;
+  if (/www\./i.test(s)) return true;
+  // very rough domain detection; intentionally strict to avoid accidental bans
+  if (/\b[a-z0-9-]+\.(com|cn|net|org|io|me|co|app|dev)\b/i.test(s)) return true;
+  return false;
 }
 
 function isImagePath(p) {
@@ -127,8 +140,13 @@ async function buildChecks(payload, mode) {
   const bodyLen = [...body].length;
   const screenshotOnly = media.length > 0 && media.every((x) => isScreenshotLike(x));
   const hotMode = mode === 'hot';
-  const hasEscapedNewlines = hasEscapedNewlineTokens(body);
+  const hasBackslashN = hasLiteralBackslashN(body);
+  const hasSlashN = hasSlashNToken(body);
   const mediaDims = await checkMediaDims(media);
+  const linkInTitle = containsLinkLike(title);
+  const linkInBody = containsLinkLike(body);
+  const linkInTags = tagsRaw.some((t) => containsLinkLike(t));
+  const linkInMediaPath = media.some((p) => containsLinkLike(p) || String(p).includes('://'));
 
   const checks = {
     has_topic: {
@@ -148,12 +166,28 @@ async function buildChecks(payload, mode) {
       value: { length: bodyLen },
     },
     body_newline_normalized: {
-      ok: !hasEscapedNewlines,
-      value: hasEscapedNewlines ? 'Found literal \\\\n or standalone /n token' : null,
+      // Allow literal "\\n" in payload (we can normalize before writing), but forbid "/n" token.
+      ok: !hasSlashN,
+      value: {
+        has_literal_backslash_n: hasBackslashN,
+        has_slash_n_token: hasSlashN,
+      },
     },
     tags_ok: {
       ok: tags.length >= 3,
       value: { count: tags.length, tags },
+    },
+    no_links_in_content: {
+      ok: !(linkInTitle || linkInBody || linkInTags),
+      value: {
+        title: linkInTitle,
+        body: linkInBody,
+        tags: linkInTags,
+      },
+    },
+    no_links_in_media_path: {
+      ok: !linkInMediaPath,
+      value: linkInMediaPath ? media : null,
     },
     media_ok: {
       ok: media.length >= 1 && !screenshotOnly,

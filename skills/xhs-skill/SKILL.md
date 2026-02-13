@@ -103,11 +103,11 @@ node ./scripts/verify_login.mjs \
 
 登录成功判定（强制）：
 
-- 必须同时满足以下 3 条才可回报“登录完成”：
+- 必须同时满足以下 2 条才可回报“登录完成”（`web_session` 不再作为硬依赖）：
 - 当前 URL 已离开 `/login`
 - 可访问创作者后台页面，且不会 401/回跳登录
-- cookies 中存在 `web_session`
-- 任一条件不满足，必须回报“登录失败/未完成”，并重试登录流程；禁止误报成功。
+- 加分项：cookies 中存在“session-like cookie”（例如 `web_session`，或 cookie 名含 `session`）。没有也可能可用，但稳定性更差。
+- 任一强制条件不满足，必须回报“登录失败/未完成”，并重试登录流程；禁止误报成功。
 
 登录结果输出契约（JSON）：
 
@@ -118,7 +118,7 @@ node ./scripts/verify_login.mjs \
   "checks": {
     "left_login": true,
     "backend_not_rejected": true,
-    "has_web_session": true
+    "has_session_like_cookie": true
   },
   "artifacts": {
     "qr_png": "data/xhs_login_qr.png",
@@ -128,7 +128,7 @@ node ./scripts/verify_login.mjs \
 }
 ```
 
-失败时 `ok=false`，并给出失败项（例如缺 `web_session`），禁止输出“已完成”。
+失败时 `ok=false`，并给出失败项（例如仍在 `/login`、或 probe 回跳），禁止输出“已完成”。
 
 6. （可选）生成 `Cookie:` header：
 
@@ -186,6 +186,21 @@ node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --mod
 3. 只有当校验结果 `ok=true` 才允许进入发布页点击“发布/提交”。
 4. 任一校验失败必须中止流程并提示补齐，禁止“只传截图直接发”。
 
+禁止链接（强制）：
+
+- 标题/正文/标签里禁止出现任何链接或域名形态（`http/https`、`www.`、`xxx.com/.cn/...`）。否则有封禁风险。
+- 如果内容生成遇到困难或校验不通过：宁可中止，不要“随便发一条”。
+
+一条命令发布（推荐，避免临场写 selector/JS）：
+
+```bash
+# 默认只把内容填好并做读回校验，不会点“发布”
+node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json --mode hot --session xhs --json
+
+# 确认无误后再加 --confirm 真正提交
+node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json --mode hot --session xhs --confirm --json
+```
+
 发布可靠性 Checklist（照这个执行，避免“看似发了其实没发/字段没落库”）：
 
 - 正文换行：写入编辑器前把 `\\n` 规范化为真实换行（`text.replaceAll("\\\\n", "\n")`），填完立刻读回校验正文 `innerText` 不包含字面量 `\\n`。
@@ -207,6 +222,10 @@ node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --mod
 - “一个红色爱心线性 icon，透明背景”
 - “适合美妆笔记的浅色系贴纸风小图标”
 2. 用 `agent-browser` 搜索并挑选 3-5 个候选（优先免版权/可复用来源）。
+2.1 配图“内容一致性”门禁（强烈建议）：
+
+- 截图入库前，先用 `agent-browser get title`/读 `h1` 检查页面内容确实包含目标关键词（否则可能是误点/错页）。
+- 需要更强一致性时再上 OCR（可选），但默认先做 `title/h1` 的低成本校验。
 3. 用 `agent-browser` 直接截图保存到：
 - `data/assets/<YYYY-MM-DD>/icons/<name>.png`
 - 把来源 URL 追加到：`data/assets/<YYYY-MM-DD>/sources.txt`
