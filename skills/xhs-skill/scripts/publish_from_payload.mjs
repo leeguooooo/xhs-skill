@@ -2,6 +2,11 @@
 import { parseArgs } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function usage() {
   return `publish_from_payload
@@ -53,6 +58,19 @@ function uniqHashtags(tags) {
   return out;
 }
 
+function parseFirstJsonObject(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  const i = s.indexOf('{');
+  const j = s.lastIndexOf('}');
+  if (i < 0 || j <= i) return null;
+  try {
+    return JSON.parse(s.slice(i, j + 1));
+  } catch {
+    return null;
+  }
+}
+
 function run(cmd, args, { stdinText } = {}) {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -82,6 +100,33 @@ async function ab(session, args, { allowFail = false } = {}) {
 }
 
 function extractRefsFromSnapshotJson(obj) {
+  // agent-browser snapshot --json output formats have changed over time.
+  // Newer builds may return: { success:true, data:{ refs:{ e1:{name,role}, ... }, snapshot:"... [ref=e1]" } }
+  // Older builds may embed refs as "@e123" tokens inside a tree. Normalize both to "@eN".
+  if (obj && typeof obj === 'object' && obj.data && typeof obj.data === 'object') {
+    const refsMap = obj.data.refs;
+    if (refsMap && typeof refsMap === 'object' && !Array.isArray(refsMap)) {
+      const out = [];
+      for (const [k, v] of Object.entries(refsMap)) {
+        const key = String(k || '').trim();
+        if (!/^e\d+$/i.test(key)) continue;
+        out.push({
+          ref: `@${key}`,
+          role: typeof v?.role === 'string' ? v.role : undefined,
+          name:
+            typeof v?.name === 'string'
+              ? v.name
+              : typeof v?.text === 'string'
+                ? v.text
+                : typeof v?.label === 'string'
+                  ? v.label
+                  : undefined,
+        });
+      }
+      if (out.length) return out;
+    }
+  }
+
   const out = [];
   const seen = new Set();
   const maxNodes = 5000;
@@ -89,7 +134,8 @@ function extractRefsFromSnapshotJson(obj) {
 
   const push = (ref, meta) => {
     if (!ref || typeof ref !== 'string') return;
-    const r = ref.trim();
+    let r = ref.trim();
+    if (/^e\d+$/i.test(r)) r = `@${r}`;
     if (!/^@e\d+$/i.test(r)) return;
     if (seen.has(r)) return;
     seen.add(r);
@@ -102,7 +148,7 @@ function extractRefsFromSnapshotJson(obj) {
     const t = typeof v;
     if (t === 'string') {
       // Sometimes refs appear embedded in strings; capture exact tokens only.
-      if (/^@e\d+$/i.test(v.trim())) push(v.trim(), meta);
+      if (/^(@)?e\d+$/i.test(v.trim())) push(v.trim(), meta);
       return;
     }
     if (t !== 'object') return;
@@ -153,15 +199,16 @@ function pickBestUploadRef(refs) {
 }
 
 async function verifyPayload(payloadPath, mode) {
+  const verifyScript = path.join(__dirname, 'verify_publish_payload.mjs');
   const r = await run(process.execPath, [
-    './scripts/verify_publish_payload.mjs',
+    verifyScript,
     '--in',
     payloadPath,
     ...(mode ? ['--mode', mode] : []),
     '--json',
   ]);
   const txt = (r.stdout || '').trim();
-  const parsed = txt ? JSON.parse(txt) : null;
+  const parsed = txt ? parseFirstJsonObject(txt) : null;
   return { code: r.code, result: parsed, raw: { stdout: r.stdout, stderr: r.stderr } };
 }
 
@@ -301,7 +348,7 @@ async function main(argv) {
 
   // 5) Preflight: file input should accept images and allow multiple when needed
   const pre = await ab(session, ['eval', jsReadback()]);
-  const preJson = JSON.parse((pre.stdout || '').trim() || '{}');
+  const preJson = parseFirstJsonObject(pre.stdout) || {};
   const inputs = Array.isArray(preJson.file_inputs) ? preJson.file_inputs : [];
   const anyVisible = inputs.find((x) => x && x.visible);
   if (media.length > 1 && anyVisible && anyVisible.multiple === false) {
@@ -316,13 +363,7 @@ async function main(argv) {
   }
   // agent-browser upload requires a @ref. We'll take a snapshot and pick the best upload-related control.
   const snap = await ab(session, ['snapshot', '-i', '--json']);
-  let snapJson = null;
-  try {
-    snapJson = JSON.parse((snap.stdout || '').trim());
-  } catch {
-    // If snapshot JSON parsing fails, we still try a generic fallback by asking for a compact snapshot.
-    snapJson = null;
-  }
+  const snapJson = parseFirstJsonObject(snap.stdout);
   const refs = snapJson ? extractRefsFromSnapshotJson(snapJson) : [];
   const uploadRef = pickBestUploadRef(refs) || (refs[0] ? refs[0].ref : null);
   if (!uploadRef) {
@@ -339,13 +380,13 @@ async function main(argv) {
 
   // 8) Fill ProseMirror body + immediate readback
   const fill = await ab(session, ['eval', jsFillProseMirror(body)]);
-  const fillJson = JSON.parse((fill.stdout || '').trim() || '{}');
+  const fillJson = parseFirstJsonObject(fill.stdout) || {};
   if (!fillJson.ok) {
     throw new Error(`Failed to fill ProseMirror: ${fillJson.error || 'unknown'}`);
   }
 
   const rb = await ab(session, ['eval', jsReadback()]);
-  const rbJson = JSON.parse((rb.stdout || '').trim() || '{}');
+  const rbJson = parseFirstJsonObject(rb.stdout) || {};
   const rbTitle = str(rbJson.title);
   const rbBody = String(rbJson.body || '');
 
