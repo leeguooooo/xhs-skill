@@ -8,6 +8,7 @@ function usage() {
 
 Usage:
   node ./scripts/verify_publish_payload.mjs --in <payloadJsonPath> [--mode hot] [--json]
+  node ./scripts/verify_publish_payload.mjs --in <payloadJsonPath> [--tag-registry ./data/tag_registry.json]
 
 Payload JSON example:
 {
@@ -26,6 +27,24 @@ Payload JSON example:
 }
 `;
 }
+
+const AI_TEMPLATE_PHRASES = [
+  '总的来说',
+  '综上所述',
+  '不难看出',
+  '值得注意的是',
+  '随着人工智能的发展',
+  '随着ai的发展',
+  '未来可期',
+  '首先',
+  '其次',
+  '最后',
+];
+
+const TAG_PLACEHOLDER_PATTERNS = [
+  /^#?(标签|话题|测试|示例|模板)$/i,
+  /^#?(test|tag|demo|sample|xxx)$/i,
+];
 
 function todayISO() {
   const d = new Date();
@@ -83,6 +102,107 @@ function containsLinkLike(text) {
   return false;
 }
 
+function normalizeTag(tag) {
+  const v = str(tag);
+  if (!v) return '';
+  return v.startsWith('#') ? v : `#${v}`;
+}
+
+function uniqueList(items) {
+  const out = [];
+  const seen = new Set();
+  for (const it of items) {
+    const v = str(it);
+    if (!v) continue;
+    const k = v.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(v);
+  }
+  return out;
+}
+
+function parseDateSafe(iso) {
+  const s = str(iso);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function daysSince(isoDate) {
+  const d = parseDateSafe(isoDate);
+  if (!d) return null;
+  const now = new Date();
+  const nowAtDay = new Date(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T00:00:00`);
+  const diff = nowAtDay.getTime() - d.getTime();
+  return Math.floor(diff / (24 * 60 * 60 * 1000));
+}
+
+async function loadTagRegistry(filePath) {
+  try {
+    const raw = await readFile(filePath, 'utf8');
+    const data = JSON.parse(raw);
+    const tagsRaw = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.tags)
+        ? data.tags
+        : [];
+    const normalized = uniqueList(tagsRaw.map(normalizeTag).filter(Boolean));
+    return {
+      exists: true,
+      path: filePath,
+      updated_at: str(data?.updated_at) || null,
+      tags: normalized,
+    };
+  } catch {
+    return {
+      exists: false,
+      path: filePath,
+      updated_at: null,
+      tags: [],
+    };
+  }
+}
+
+function hasAiTemplateStyle(body) {
+  const s = String(body || '').toLowerCase();
+  return AI_TEMPLATE_PHRASES.filter((p) => s.includes(p.toLowerCase()));
+}
+
+function hasPersonalVoice(body) {
+  return /(我|我们|我觉得|我观察|我测了|我试了|我踩坑|我自己|这周我)/.test(String(body || ''));
+}
+
+function hasConcreteSignals({ body, sourceName, sourceDate }) {
+  const s = String(body || '');
+  const digitCount = (s.match(/\d/g) || []).length;
+  const hasDateLike = /\d{4}[年\-/.]\d{1,2}[月\-/.]\d{1,2}日?/.test(s) || /\d{1,2}月\d{1,2}日/.test(s);
+  const hasAmountLike = /\d+\s*(亿|万|%|美元|人民币|条|家|款|次)/.test(s);
+  const hasSourceMention = !!sourceName && s.includes(sourceName);
+  const hasWeekMention = /(这周|本周|今天|昨日|刚刚)/.test(s) || (!!sourceDate && s.includes(sourceDate));
+  return {
+    ok: digitCount >= 2 || hasDateLike || hasAmountLike || hasSourceMention || hasWeekMention,
+    value: {
+      digit_count: digitCount,
+      has_date_like: hasDateLike,
+      has_amount_like: hasAmountLike,
+      has_source_mention: hasSourceMention,
+      has_week_mention: hasWeekMention,
+    },
+  };
+}
+
+function hasPlaceholderTag(tags) {
+  const hit = [];
+  for (const t of tags) {
+    const x = str(t);
+    if (!x) continue;
+    if (TAG_PLACEHOLDER_PATTERNS.some((re) => re.test(x))) hit.push(x);
+  }
+  return hit;
+}
+
 function isImagePath(p) {
   const s = String(p || '').toLowerCase();
   return s.endsWith('.png') || s.endsWith('.jpg') || s.endsWith('.jpeg');
@@ -124,7 +244,7 @@ async function checkMediaDims(media) {
   };
 }
 
-async function buildChecks(payload, mode) {
+async function buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags }) {
   const topic = str(payload?.topic);
   const sourceName = str(payload?.source?.name);
   const sourceUrl = str(payload?.source?.url);
@@ -132,7 +252,7 @@ async function buildChecks(payload, mode) {
 
   const title = str(payload?.post?.title);
   const body = str(payload?.post?.body);
-  const tagsRaw = pickArray(payload?.post?.tags).map((x) => str(x)).filter(Boolean);
+  const tagsRaw = pickArray(payload?.post?.tags).map((x) => normalizeTag(x)).filter(Boolean);
   const tags = tagsRaw.filter((x) => x.startsWith('#'));
   const media = pickArray(payload?.post?.media).map((x) => str(x)).filter(Boolean);
 
@@ -147,6 +267,15 @@ async function buildChecks(payload, mode) {
   const linkInBody = containsLinkLike(body);
   const linkInTags = tagsRaw.some((t) => containsLinkLike(t));
   const linkInMediaPath = media.some((p) => containsLinkLike(p) || String(p).includes('://'));
+  const duplicateTagCount = tagsRaw.length - uniqueList(tagsRaw).length;
+  const placeholderTags = hasPlaceholderTag(tagsRaw);
+  const aiTemplateHits = hasAiTemplateStyle(body);
+  const personalVoice = hasPersonalVoice(body);
+  const concreteSignals = hasConcreteSignals({ body, sourceName, sourceDate });
+  const registryTagSet = new Set((tagRegistry?.tags || []).map((x) => str(x).toLowerCase()));
+  const unverifiedTags = tags.filter((t) => !registryTagSet.has(str(t).toLowerCase()));
+  const registryAgeDays = daysSince(tagRegistry?.updated_at);
+  const registryFresh = registryAgeDays !== null && registryAgeDays >= 0 && registryAgeDays <= 7;
 
   const checks = {
     has_topic: {
@@ -174,8 +303,27 @@ async function buildChecks(payload, mode) {
       },
     },
     tags_ok: {
-      ok: tags.length >= 3,
-      value: { count: tags.length, tags },
+      ok: tags.length >= 3 && tags.length <= 8 && duplicateTagCount === 0,
+      value: { count: tags.length, duplicate_count: duplicateTagCount, tags },
+    },
+    tags_not_placeholder: {
+      ok: placeholderTags.length === 0,
+      value: {
+        hit: placeholderTags,
+      },
+    },
+    tags_from_registry: {
+      ok: allowUnverifiedTags || (tagRegistry.exists && registryFresh && unverifiedTags.length === 0),
+      value: {
+        allow_unverified_tags: allowUnverifiedTags,
+        registry_exists: !!tagRegistry.exists,
+        registry_path: tagRegistry.path,
+        registry_updated_at: tagRegistry.updated_at,
+        registry_age_days: registryAgeDays,
+        registry_fresh_within_days_7: registryFresh,
+        registry_tag_count: tagRegistry.tags.length,
+        unverified_tags: unverifiedTags,
+      },
     },
     no_links_in_content: {
       ok: !(linkInTitle || linkInBody || linkInTags),
@@ -194,6 +342,17 @@ async function buildChecks(payload, mode) {
       value: { count: media.length, screenshot_only: screenshotOnly, media },
     },
     media_dim_ok: mediaDims,
+    anti_ai_personal_voice: {
+      ok: personalVoice,
+      value: { has_personal_voice: personalVoice },
+    },
+    anti_ai_concrete_signals: concreteSignals,
+    anti_ai_template_phrase: {
+      ok: aiTemplateHits.length === 0,
+      value: {
+        hit: aiTemplateHits,
+      },
+    },
     hot_source_is_today: {
       ok: !hotMode || sourceDate === todayISO(),
       value: { required_date: hotMode ? todayISO() : null, source_date: sourceDate || null },
@@ -209,6 +368,8 @@ async function main(argv) {
     options: {
       in: { type: 'string' },
       mode: { type: 'string', default: 'normal' },
+      'tag-registry': { type: 'string', default: './data/tag_registry.json' },
+      'allow-unverified-tags': { type: 'boolean', default: false },
       json: { type: 'boolean', default: true },
       help: { type: 'boolean', default: false },
     },
@@ -227,7 +388,10 @@ async function main(argv) {
   const raw = await readFile(values.in, 'utf8');
   const payload = JSON.parse(raw);
   const mode = str(values.mode || 'normal').toLowerCase();
-  const checks = await buildChecks(payload, mode);
+  const tagRegistryPath = str(values['tag-registry']) || './data/tag_registry.json';
+  const tagRegistry = await loadTagRegistry(tagRegistryPath);
+  const allowUnverifiedTags = !!values['allow-unverified-tags'];
+  const checks = await buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags });
 
   const missing = Object.entries(checks)
     .filter(([, item]) => !item.ok)
@@ -237,6 +401,11 @@ async function main(argv) {
     task: 'xhs_publish_payload_validate',
     ok: missing.length === 0,
     mode,
+    policy: {
+      tag_registry_path: tagRegistry.path,
+      allow_unverified_tags: allowUnverifiedTags,
+      anti_ai_style_required: true,
+    },
     checks,
     missing,
   };

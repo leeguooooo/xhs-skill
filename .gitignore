@@ -11,6 +11,9 @@ node_modules/
 /data/*.xlsx
 /data/*.txt
 /data/*.png
+/data/*.jpg
+/data/*.jpeg
+/data/assets/
 /data/exports/
 
 # Temporary

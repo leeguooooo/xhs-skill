@@ -19,14 +19,14 @@ Goal:
 Usage:
   node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--mode hot] [--session xhs] [--profile ~/.xhs-profile] [--confirm] [--json]
   node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--confirm] [--min-interval-minutes 30] [--max-posts-per-day 3] [--rate-log ./data/publish_rate_log.json]
-  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--humanize on|off] [--headed on|off]
+  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--humanize on|off] [--headed on|off] [--allow-eval-fallback off] [--ack-real-topics]
 
 Notes:
   - By default this script DOES NOT click "发布". Use --confirm to actually submit.
   - Anti-risk defaults are enabled: headed mode, random pauses, and pre-publish warmup browsing.
+  - It never auto-appends hashtags into body; select real topics manually in XHS UI.
   - For stable fingerprints, prefer fixed --profile (especially when using --confirm).
   - It will hard-fail if title/body contain link-like text (http/www/domain).
-  - It appends hashtags into the body to avoid fragile tag widgets.
 `;
 }
 
@@ -510,9 +510,11 @@ async function main(argv) {
       profile: { type: 'string' },
       headed: { type: 'string', default: 'on' },
       humanize: { type: 'string', default: 'on' },
+      'allow-eval-fallback': { type: 'string', default: 'off' },
       'min-interval-minutes': { type: 'string', default: '30' },
       'max-posts-per-day': { type: 'string', default: '3' },
       'rate-log': { type: 'string', default: './data/publish_rate_log.json' },
+      'ack-real-topics': { type: 'boolean', default: false },
       confirm: { type: 'boolean', default: false },
       json: { type: 'boolean', default: true },
       help: { type: 'boolean', default: false },
@@ -531,9 +533,11 @@ async function main(argv) {
   const profile = str(values.profile);
   const headed = parseToggle(values.headed, true);
   const humanize = parseToggle(values.humanize, true);
+  const allowEvalFallback = parseToggle(values['allow-eval-fallback'], false);
   const minIntervalMinutes = toPositiveInt(values['min-interval-minutes'], 30);
   const maxPostsPerDay = toPositiveInt(values['max-posts-per-day'], 3);
   const rateLogPath = str(values['rate-log']) || './data/publish_rate_log.json';
+  const ackRealTopics = !!values['ack-real-topics'];
   const publishPollAttempts = 25;
   const publishPollIntervalMs = 1200;
   const confirm = !!values.confirm;
@@ -546,6 +550,8 @@ async function main(argv) {
     headed,
     profile: profile || null,
     humanize,
+    allow_eval_fallback: allowEvalFallback,
+    ack_real_topics: ackRealTopics,
     min_interval_minutes: minIntervalMinutes,
     max_posts_per_day: maxPostsPerDay,
     rate_log: path.resolve(rateLogPath),
@@ -607,10 +613,6 @@ async function main(argv) {
     process.exitCode = 2;
     return;
   }
-
-  // Append hashtags to body to avoid fragile tag widget behavior.
-  const hashLine = tags.length ? `\n\n${tags.join(' ')}` : '';
-  if (hashLine && !body.includes(tags[0])) body += hashLine;
 
   const humanTrace = [];
   if (humanize) {
@@ -698,6 +700,19 @@ async function main(argv) {
     }
   }
   if (!titleTyped) {
+    const fillAttempts = [
+      ['find', 'role', 'textbox', 'fill', '--name', '标题', title],
+      ['fill', 'input[placeholder*="标题"]', title],
+    ];
+    for (const cmd of fillAttempts) {
+      const r = await ab(session, cmd, { allowFail: true });
+      if (r.code === 0) {
+        titleTyped = true;
+        break;
+      }
+    }
+  }
+  if (!titleTyped && allowEvalFallback) {
     await ab(
       session,
       [
@@ -712,6 +727,12 @@ async function main(argv) {
         })()`,
       ],
       { allowFail: true }
+    );
+    titleTyped = true;
+  }
+  if (!titleTyped) {
+    throw new Error(
+      'Failed to fill title with human-like typing/fill. Re-run with --allow-eval-fallback on only if necessary.'
     );
   }
 
@@ -750,12 +771,18 @@ async function main(argv) {
       break;
     }
   }
-  if (!bodyTyped) {
+  if (!bodyTyped && allowEvalFallback) {
     const fill = await ab(session, ['eval', jsFillProseMirror(body)]);
     const fillJson = parseFirstJsonObject(fill.stdout) || {};
     if (!fillJson.ok) {
       throw new Error(`Failed to fill ProseMirror: ${fillJson.error || 'unknown'}`);
     }
+    bodyTyped = true;
+  }
+  if (!bodyTyped) {
+    throw new Error(
+      'Failed to fill body with human-like typing. Re-run with --allow-eval-fallback on only if necessary.'
+    );
   }
 
   if (humanize) humanTrace.push(await humanPause(session, 1500, 4200, 'pause_after_body'));
@@ -803,9 +830,28 @@ async function main(argv) {
         warnings,
         trace: humanTrace,
       },
-      note: 'Run again with --confirm to actually click publish.',
+      note: 'Select at least 3 real topics in XHS UI, then run again with --confirm --ack-real-topics.',
     };
     console.log(JSON.stringify(out, null, 2));
+    return;
+  }
+
+  if (!ackRealTopics) {
+    const out = {
+      task: 'xhs_publish_auto',
+      ok: false,
+      stage: 'tag_gate',
+      error: 'Real topics not acknowledged. Select at least 3 real XHS topics manually, then re-run with --confirm --ack-real-topics.',
+      payload: payloadPath,
+      mode,
+      anti_risk: {
+        ...antiRisk,
+        warnings,
+        trace: humanTrace,
+      },
+    };
+    console.log(JSON.stringify(out, null, 2));
+    process.exitCode = 2;
     return;
   }
 

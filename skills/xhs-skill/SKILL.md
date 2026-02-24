@@ -209,10 +209,10 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 
 ```bash
 # 普通模式
-node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --json
+node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --tag-registry ./data/tag_registry.json --json
 
 # 今天热点模式（强制 source.date = 今天）
-node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --mode hot --json
+node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --tag-registry ./data/tag_registry.json --mode hot --json
 ```
 
 3. 只有当校验结果 `ok=true` 才允许进入发布页点击“发布/提交”。
@@ -223,6 +223,25 @@ node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --mod
 - 标题/正文/标签里禁止出现任何链接或域名形态（`http/https`、`www.`、`xxx.com/.cn/...`）。否则有封禁风险。
 - 如果内容生成遇到困难或校验不通过：宁可中止，不要“随便发一条”。
 
+反 AI 识别与真实标签（强制）：
+
+- 不承诺“100% 不被识别为 AI”；目标是显著降低风险。
+- 正文必须有“个人视角 + 具体事实信号（数字/日期/来源提及）”，并规避模板腔。
+- 标签必须来自真实话题池 `data/tag_registry.json`，禁止自造标签。
+- 禁止自动把 `#标签` 拼进正文冒充话题。
+- 发布前必须在小红书发布页手动选择至少 3 个真实话题，然后再执行 `--confirm --ack-real-topics`。
+
+示例：准备真实标签池（建议每天更新）：
+
+```bash
+cat > ./data/tag_registry.json <<'JSON'
+{
+  "updated_at": "2026-02-24",
+  "tags": ["#AI热点", "#人工智能", "#行业观察", "#科技新闻"]
+}
+JSON
+```
+
 一条命令发布（推荐，避免临场写 selector/JS）：
 
 ```bash
@@ -232,15 +251,17 @@ node ./scripts/publish_from_payload.mjs \
   --mode hot \
   --session xhs \
   --profile ~/.xhs-profile \
+  --allow-eval-fallback off \
   --json
 
-# 确认无误后再加 --confirm 真正提交（会执行频率门禁）
+# 先手动选择至少 3 个真实话题，再 --confirm 真正提交（会执行频率门禁）
 node ./scripts/publish_from_payload.mjs \
   --payload ./data/publish_payload.json \
   --mode hot \
   --session xhs \
   --profile ~/.xhs-profile \
   --confirm \
+  --ack-real-topics \
   --min-interval-minutes 30 \
   --max-posts-per-day 3 \
   --rate-log ./data/publish_rate_log.json \
@@ -250,7 +271,7 @@ node ./scripts/publish_from_payload.mjs \
 发布可靠性 Checklist（照这个执行，避免“看似发了其实没发/字段没落库”）：
 
 - 正文换行：写入编辑器前把 `\\n` 规范化为真实换行（`text.replaceAll("\\\\n", "\n")`），填完立刻读回校验正文 `innerText` 不包含字面量 `\\n`。
-- 标题/正文/标签写入后都要读回校验：标题是否存在且 `<= 20`；正文是否非空且长度达标；标签是否至少 3 个且都以 `#` 开头。
+- 标题/正文/标签写入后都要读回校验：标题是否存在且 `<= 20`；正文是否非空且长度达标；标签是否至少 3 个且都以 `#` 开头、并来自 `tag_registry`。
 - ProseMirror：正文必须定位到 `.ProseMirror[contenteditable=true]`（不要按普通 input/textarea 假设），并触发必要的 `input/change`。
 - 发布按钮：页面可能有多个“发布”入口，必须点击“可见 + enabled + 文案严格匹配”的主按钮；点击后用 URL/页面状态确认已跳转到成功/管理页。
 - 图片重传：若需要替换，先点“清空”并在弹窗选择“重新上传”；上传后等待缩略图数量稳定再继续。
@@ -287,10 +308,12 @@ node ./scripts/publish_from_payload.mjs \
 - 标题必须 `8~20` 字（超过 20 字先裁剪或提示用户改短）
 - 正文必须 `>= 80` 字
 - 标签至少 3 个，且都以 `#` 开头
+- 标签必须命中 `data/tag_registry.json`（真实话题池），禁止占位/自造标签
 - 禁止“仅截图素材”直接发布（如只含 `screenshot/login_qr` 等截图文件）
 - 正文编辑区按 `ProseMirror` 处理，不要按普通 input 假设
 - 每次点击/填写前先刷新 ref，避免 ref 漂移误操作
 6. 点击“发布/提交”前暂停，要求用户确认最终预览。
+6.1 发布前手动选择至少 3 个真实话题，再用 `--confirm --ack-real-topics` 提交。
 7. 发布后记录结果页 URL；失败时截图并记录错误文案。
 
 发布结果输出契约（JSON）：
@@ -336,4 +359,4 @@ node ./scripts/publish_from_payload.mjs \
 - `node ./bin/xhs-skill.mjs cookies normalize --in <jsonPath> --out <outPath>`
 - `node ./bin/xhs-skill.mjs cookies status --in <cookiesJsonPath>`
 - `node ./bin/xhs-skill.mjs cookies to-header --in <cookiesJsonPath>`
-- `node ./scripts/verify_publish_payload.mjs --in <payloadJsonPath> [--mode hot]`
+- `node ./scripts/verify_publish_payload.mjs --in <payloadJsonPath> --tag-registry ./data/tag_registry.json [--mode hot]`

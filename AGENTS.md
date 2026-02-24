@@ -29,3 +29,9 @@ This repository is **skill-first**.
 - All cookies and exports go under `data/`.
 - `data/` is gitignored (except `.gitkeep`).
 - Never paste cookies/tokens directly into chat logs; write them to `data/`.
+
+## Publish Quality Gates
+
+- Do not claim "100% undetectable AI"; only reduce risk with stricter content checks.
+- Require anti-AI style checks (personal perspective + concrete facts, avoid template phrasing).
+- Require real tags from `data/tag_registry.json`; do not fabricate tags or fake topic hashtags.

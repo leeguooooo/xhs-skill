@@ -69,6 +69,7 @@ node ./skills/xhs-skill/scripts/verify_login.mjs \
 ```bash
 node ./skills/xhs-skill/scripts/verify_publish_payload.mjs \
   --in ./data/publish_payload.json \
+  --tag-registry ./data/tag_registry.json \
   --mode hot \
   --json
 ```
@@ -84,15 +85,17 @@ node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
   --mode hot \
   --session xhs \
   --profile ~/.xhs-profile \
+  --allow-eval-fallback off \
   --json
 
-# 确认后再提交（默认最小间隔 30 分钟、24h 最多 3 篇）
+# 先在发布页手动选择至少 3 个真实话题，再确认提交
 node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
   --payload ./data/publish_payload.json \
   --mode hot \
   --session xhs \
   --profile ~/.xhs-profile \
   --confirm \
+  --ack-real-topics \
   --min-interval-minutes 30 \
   --max-posts-per-day 3 \
   --rate-log ./data/publish_rate_log.json \
@@ -108,10 +111,29 @@ node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
 - 网络：优先家庭宽带/手机热点，避免机房 IP、频繁切换代理。
 - 恢复：被限流后停止自动化，先手动养号 `3~7` 天。
 
+## 反 AI 识别与真实标签门禁（强制）
+
+- 不承诺“100% 不被识别为 AI”，目标是显著降低风险。
+- 文案必须通过 `anti_ai` 门禁：需要个人视角、具体事实信号（数字/日期/来源提及），并规避模板腔。
+- 禁止自动把 `#标签` 直接拼进正文冒充话题。
+- 标签必须来自真实话题池 `data/tag_registry.json`（建议每日更新），禁止自造标签。
+- 发布前必须在小红书发布页手动选择至少 3 个真实话题，再执行 `--confirm --ack-real-topics`。
+
+示例：准备真实标签池
+
+```bash
+cat > ./data/tag_registry.json <<'JSON'
+{
+  "updated_at": "2026-02-24",
+  "tags": ["#AI热点", "#人工智能", "#行业观察", "#科技新闻"]
+}
+JSON
+```
+
 ## 硬门禁标准（用来挡住“低质发布”）
 
 - 登录：离开 `/login` + 后台页不回跳/不 401 + cookies 含 `web_session`
-- 发布（热点）：标题 8~20 字 + 正文 >= 80 字 + 标签 >= 3 个（且都以 `#` 开头）+ 有媒体且非“仅截图” + 来源名/URL/日期齐全（`--mode hot` 要求来源日期=当天）
+- 发布（热点）：标题 8~20 字 + 正文 >= 80 字 + 标签 >= 3 个（且都以 `#` 开头，且在 `tag_registry` 中）+ 有媒体且非“仅截图” + 来源名/URL/日期齐全（`--mode hot` 要求来源日期=当天）+ anti_ai 门禁通过
 
 ## 命令速查
 
@@ -126,10 +148,10 @@ node ./skills/xhs-skill/bin/xhs-skill.mjs cookies normalize --in <raw.json> --ou
 node ./skills/xhs-skill/scripts/verify_login.mjs --cookies <xhs.json> --current-url <url> --probe-final-url <url> --json
 
 # 发布门禁（热点）
-node ./skills/xhs-skill/scripts/verify_publish_payload.mjs --in <payload.json> --mode hot --json
+node ./skills/xhs-skill/scripts/verify_publish_payload.mjs --in <payload.json> --tag-registry ./data/tag_registry.json --mode hot --json
 
 # 带防封策略的发布（先不提交）
-node ./skills/xhs-skill/scripts/publish_from_payload.mjs --payload <payload.json> --mode hot --session xhs --profile ~/.xhs-profile --json
+node ./skills/xhs-skill/scripts/publish_from_payload.mjs --payload <payload.json> --mode hot --session xhs --profile ~/.xhs-profile --allow-eval-fallback off --json
 ```
 
 ## 常见问题（只保留最常见）
