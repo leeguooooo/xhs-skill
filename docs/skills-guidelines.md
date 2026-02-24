@@ -8,7 +8,7 @@
 
 ## 浏览器操作约定
 
-- 所有浏览器交互：调用/委托 `agent-browser` skill
+- 所有浏览器交互：调用/委托 `agent-browser-stealth` skill
 - 本仓库的技能只负责：页面目标、元素识别策略、失败回退、人工确认点
 
 ## 本地工具约定（Node.js）

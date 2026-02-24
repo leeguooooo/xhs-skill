@@ -80,8 +80,8 @@ export function normalizeCookiesPayload(input) {
     // Supported shapes:
     // - [...]
     // - { cookies: [...] }
-    // - { data: { cookies: [...] } } (agent-browser --json)
-    // - { success: true, data: { cookies: [...] }, error: null } (agent-browser --json)
+    // - { data: { cookies: [...] } } (agent-browser-stealth --json)
+    // - { success: true, data: { cookies: [...] }, error: null } (agent-browser-stealth --json)
     if (Array.isArray(input.cookies)) {
       cookiesRaw = input.cookies;
     } else if (input.data && typeof input.data === 'object' && Array.isArray(input.data.cookies)) {

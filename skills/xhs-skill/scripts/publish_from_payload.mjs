@@ -1,29 +1,39 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const BROWSER_BIN = 'agent-browser-stealth';
 
 function usage() {
   return `publish_from_payload
 
 Goal:
-  Read data/publish_payload*.json and run a serial publish flow via agent-browser:
-  open -> ensure 图文 -> upload -> fill title -> fill ProseMirror body -> (optional) publish -> readback checks.
+  Read data/publish_payload*.json and run a serial publish flow via agent-browser-stealth:
+  warmup -> open publish -> ensure 图文 -> upload -> humanized typing -> (optional) publish -> readback checks.
 
 Usage:
-  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--mode hot] [--session xhs] [--confirm] [--json]
+  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--mode hot] [--session xhs] [--profile ~/.xhs-profile] [--confirm] [--json]
+  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--confirm] [--min-interval-minutes 30] [--max-posts-per-day 3] [--rate-log ./data/publish_rate_log.json]
+  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--humanize on|off] [--headed on|off]
 
 Notes:
   - By default this script DOES NOT click "发布". Use --confirm to actually submit.
+  - Anti-risk defaults are enabled: headed mode, random pauses, and pre-publish warmup browsing.
+  - For stable fingerprints, prefer fixed --profile (especially when using --confirm).
   - It will hard-fail if title/body contain link-like text (http/www/domain).
   - It appends hashtags into the body to avoid fragile tag widgets.
 `;
 }
+
+const browserRuntime = {
+  profile: '',
+  headed: true,
+};
 
 function str(v) {
   return String(v || '').trim();
@@ -71,6 +81,164 @@ function parseFirstJsonObject(text) {
   }
 }
 
+function toPositiveInt(value, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+function parseToggle(value, fallback = true) {
+  const s = String(value ?? '').trim().toLowerCase();
+  if (!s) return fallback;
+  if (['1', 'true', 'on', 'yes', 'y'].includes(s)) return true;
+  if (['0', 'false', 'off', 'no', 'n'].includes(s)) return false;
+  return fallback;
+}
+
+function randInt(min, max) {
+  const lo = Math.max(1, Math.floor(min));
+  const hi = Math.max(lo, Math.floor(max));
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
+function nowISO() {
+  return new Date().toISOString();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function isPublishSuccessUrl(url) {
+  const s = str(url);
+  if (!s) return false;
+  return /https?:\/\/creator\.xiaohongshu\.com\/publish\/success(?:[/?#]|$)/i.test(s);
+}
+
+async function pollPublishSuccessUrl(
+  session,
+  {
+    maxAttempts = 25,
+    intervalMs = 1200,
+  } = {}
+) {
+  const attempts = Math.max(1, toPositiveInt(maxAttempts, 25));
+  const interval = Math.max(200, toPositiveInt(intervalMs, 1200));
+
+  let lastUrl = '';
+  for (let i = 1; i <= attempts; i++) {
+    const r = await ab(session, ['get', 'url'], { allowFail: true });
+    const currentUrl = str(r.stdout);
+    if (currentUrl) lastUrl = currentUrl;
+    if (r.code === 0 && isPublishSuccessUrl(currentUrl)) {
+      return {
+        ok: true,
+        attempts_used: i,
+        max_attempts: attempts,
+        interval_ms: interval,
+        url: currentUrl,
+      };
+    }
+    if (i < attempts) await sleep(interval);
+  }
+
+  return {
+    ok: false,
+    attempts_used: attempts,
+    max_attempts: attempts,
+    interval_ms: interval,
+    last_url: lastUrl || null,
+  };
+}
+
+async function readJsonSafe(filePath, fallbackValue) {
+  try {
+    const raw = await readFile(filePath, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return fallbackValue;
+  }
+}
+
+async function writeJsonAtomic(filePath, value) {
+  const full = path.resolve(filePath);
+  await mkdir(path.dirname(full), { recursive: true });
+  await writeFile(full, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+async function humanPause(session, minMs, maxMs, label) {
+  const ms = randInt(minMs, maxMs);
+  await ab(session, ['wait', ms], { allowFail: true });
+  return { label, wait_ms: ms };
+}
+
+async function runWarmupBrowsing(session) {
+  const steps = [];
+
+  const runStep = async (label, args) => {
+    const r = await ab(session, args, { allowFail: true });
+    steps.push({ label, ok: r.code === 0 });
+    return r.code === 0;
+  };
+
+  await runStep('open_explore', ['open', 'https://www.xiaohongshu.com/explore']);
+  await runStep('wait_explore_loaded', ['wait', '--load', 'domcontentloaded']);
+  steps.push(await humanPause(session, 6000, 12000, 'dwell_explore_before_scroll'));
+  await runStep('scroll_explore_once', ['eval', 'window.scrollTo(0, Math.max(500, Math.floor(window.innerHeight * 0.8))); "ok";']);
+  steps.push(await humanPause(session, 5000, 10000, 'dwell_explore_after_scroll'));
+
+  await runStep('open_creator_home', ['open', 'https://creator.xiaohongshu.com/creator/home']);
+  await runStep('wait_creator_home_loaded', ['wait', '--load', 'networkidle']);
+  steps.push(await humanPause(session, 4000, 9000, 'dwell_creator_home'));
+
+  return steps;
+}
+
+function normalizeRateEntries(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object' && Array.isArray(raw.entries)) return raw.entries;
+  return [];
+}
+
+function checkPublishRateGate(entries, { profileKey, minIntervalMinutes, maxPostsPerDay }) {
+  const now = Date.now();
+  const dayAgo = now - 24 * 60 * 60 * 1000;
+  const minIntervalMs = minIntervalMinutes * 60 * 1000;
+
+  const own = entries.filter((x) => x && x.profile_key === profileKey && Number.isFinite(Number(x.ts)));
+  const ownLast24h = own.filter((x) => Number(x.ts) >= dayAgo).sort((a, b) => Number(a.ts) - Number(b.ts));
+
+  const count24h = ownLast24h.length;
+  const latest = ownLast24h.length ? ownLast24h[ownLast24h.length - 1] : null;
+  const sinceLastMs = latest ? Math.max(0, now - Number(latest.ts)) : null;
+
+  if (count24h >= maxPostsPerDay) {
+    return {
+      ok: false,
+      reason: 'too_many_posts_24h',
+      count_24h: count24h,
+      max_posts_per_day: maxPostsPerDay,
+    };
+  }
+
+  if (sinceLastMs !== null && sinceLastMs < minIntervalMs) {
+    return {
+      ok: false,
+      reason: 'min_interval_not_met',
+      minutes_since_last: Math.floor(sinceLastMs / 60000),
+      min_interval_minutes: minIntervalMinutes,
+      wait_more_minutes: Math.ceil((minIntervalMs - sinceLastMs) / 60000),
+    };
+  }
+
+  return {
+    ok: true,
+    count_24h: count24h,
+    max_posts_per_day: maxPostsPerDay,
+    min_interval_minutes: minIntervalMinutes,
+  };
+}
+
 function run(cmd, args, { stdinText } = {}) {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -89,18 +257,20 @@ function run(cmd, args, { stdinText } = {}) {
 
 async function ab(session, args, { allowFail = false } = {}) {
   const full = [];
+  if (browserRuntime.headed) full.push('--headed');
+  if (browserRuntime.profile) full.push('--profile', browserRuntime.profile);
   if (session) full.push('--session', session);
   full.push(...args);
-  const r = await run('agent-browser', full);
+  const r = await run(BROWSER_BIN, full);
   if (!allowFail && r.code !== 0) {
-    const msg = `agent-browser failed: ${args.join(' ')}\n${r.stderr || r.stdout}`;
+    const msg = `${BROWSER_BIN} failed: ${args.join(' ')}\n${r.stderr || r.stdout}`;
     throw new Error(msg.trim());
   }
   return r;
 }
 
 function extractRefsFromSnapshotJson(obj) {
-  // agent-browser snapshot --json output formats have changed over time.
+  // agent-browser-stealth snapshot --json output formats have changed over time.
   // Newer builds may return: { success:true, data:{ refs:{ e1:{name,role}, ... }, snapshot:"... [ref=e1]" } }
   // Older builds may embed refs as "@e123" tokens inside a tree. Normalize both to "@eN".
   if (obj && typeof obj === 'object' && obj.data && typeof obj.data === 'object') {
@@ -311,7 +481,7 @@ function jsSelectBestFileInput({ expectMultiple }) {
 
   if (!best) return JSON.stringify({ ok: false, error: 'No suitable file input found' });
 
-  // Tag it so agent-browser upload can target it reliably.
+  // Tag it so agent-browser-stealth upload can target it reliably.
   best.id = 'xhs_skill_upload_input';
   best.setAttribute('data-xhs-skill', 'upload');
 
@@ -337,6 +507,12 @@ async function main(argv) {
       payload: { type: 'string' },
       mode: { type: 'string', default: 'normal' },
       session: { type: 'string' },
+      profile: { type: 'string' },
+      headed: { type: 'string', default: 'on' },
+      humanize: { type: 'string', default: 'on' },
+      'min-interval-minutes': { type: 'string', default: '30' },
+      'max-posts-per-day': { type: 'string', default: '3' },
+      'rate-log': { type: 'string', default: './data/publish_rate_log.json' },
       confirm: { type: 'boolean', default: false },
       json: { type: 'boolean', default: true },
       help: { type: 'boolean', default: false },
@@ -352,7 +528,49 @@ async function main(argv) {
   const payloadPath = str(values.payload) || './data/publish_payload.json';
   const mode = str(values.mode || 'normal').toLowerCase();
   const session = str(values.session);
+  const profile = str(values.profile);
+  const headed = parseToggle(values.headed, true);
+  const humanize = parseToggle(values.humanize, true);
+  const minIntervalMinutes = toPositiveInt(values['min-interval-minutes'], 30);
+  const maxPostsPerDay = toPositiveInt(values['max-posts-per-day'], 3);
+  const rateLogPath = str(values['rate-log']) || './data/publish_rate_log.json';
+  const publishPollAttempts = 25;
+  const publishPollIntervalMs = 1200;
   const confirm = !!values.confirm;
+  const warnings = [];
+
+  browserRuntime.profile = profile;
+  browserRuntime.headed = headed;
+
+  const antiRisk = {
+    headed,
+    profile: profile || null,
+    humanize,
+    min_interval_minutes: minIntervalMinutes,
+    max_posts_per_day: maxPostsPerDay,
+    rate_log: path.resolve(rateLogPath),
+    publish_success_poll: {
+      max_attempts: publishPollAttempts,
+      interval_ms: publishPollIntervalMs,
+    },
+  };
+
+  if (confirm && !session && !profile) {
+    const out = {
+      task: 'xhs_publish_auto',
+      ok: false,
+      stage: 'risk_gate',
+      error: 'Publishing with --confirm requires --session or --profile so fingerprint/session can stay stable.',
+      anti_risk: antiRisk,
+    };
+    console.log(JSON.stringify(out, null, 2));
+    process.exitCode = 2;
+    return;
+  }
+
+  if (confirm && !profile) {
+    warnings.push('No --profile provided. Prefer fixed profile to reduce new-device risk.');
+  }
 
   // 1) Validate payload (gate)
   const verified = await verifyPayload(payloadPath, mode === 'hot' ? 'hot' : 'normal');
@@ -394,6 +612,12 @@ async function main(argv) {
   const hashLine = tags.length ? `\n\n${tags.join(' ')}` : '';
   if (hashLine && !body.includes(tags[0])) body += hashLine;
 
+  const humanTrace = [];
+  if (humanize) {
+    const warmup = await runWarmupBrowsing(session);
+    humanTrace.push(...warmup);
+  }
+
   // 3) Open publish page
   await ab(session, ['open', 'https://creator.xiaohongshu.com/creator/publish']);
   await ab(session, ['wait', '--load', 'networkidle']);
@@ -429,7 +653,7 @@ async function main(argv) {
   if (selJson.ok) {
     await ab(session, ['upload', '#xhs_skill_upload_input', ...media]);
   } else {
-    // Fallback: try generic selector (agent-browser supports CSS selectors here).
+    // Fallback: try generic selector (agent-browser-stealth supports CSS selectors here).
     const r = await ab(session, ['upload', 'input[type=file]', ...media], { allowFail: true });
     if (r.code !== 0) {
       throw new Error(
@@ -440,18 +664,101 @@ async function main(argv) {
 
   await ab(session, ['wait', '--load', 'networkidle']);
   await ab(session, ['wait', Math.min(15000, 1000 * Math.max(2, media.length * 2))]);
+  if (humanize) humanTrace.push(await humanPause(session, 1200, 3500, 'pause_after_upload'));
 
-  // 7) Fill title (best-effort locators)
-  await ab(session, ['find', 'role', 'textbox', 'fill', '--name', '标题', title], { allowFail: true });
-  await ab(session, ['find', 'label', '标题', 'fill', title], { allowFail: true });
-  await ab(session, ['eval', `(() => { const el=document.querySelector('input[placeholder*="标题"]')||document.querySelector('input[maxlength]'); if(!el) return 'NO_TITLE_INPUT'; el.focus(); el.value=${JSON.stringify(title)}; el.dispatchEvent(new Event('input',{bubbles:true})); return 'OK'; })()`], { allowFail: true });
+  // 7) Fill title (humanized typing first, direct assignment fallback)
+  const titleDelay = randInt(65, 120);
+  await ab(
+    session,
+    [
+      'eval',
+      `(() => {
+        const el = document.querySelector('input[placeholder*="标题"]') || document.querySelector('input[maxlength]');
+        if (!el) return 'NO_TITLE_INPUT';
+        el.focus();
+        el.value = '';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        return 'OK';
+      })()`,
+    ],
+    { allowFail: true }
+  );
 
-  // 8) Fill ProseMirror body + immediate readback
-  const fill = await ab(session, ['eval', jsFillProseMirror(body)]);
-  const fillJson = parseFirstJsonObject(fill.stdout) || {};
-  if (!fillJson.ok) {
-    throw new Error(`Failed to fill ProseMirror: ${fillJson.error || 'unknown'}`);
+  let titleTyped = false;
+  const titleAttempts = [
+    ['find', 'role', 'textbox', 'type', '--name', '标题', title, '--delay', String(titleDelay)],
+    ['find', 'label', '标题', 'type', title, '--delay', String(titleDelay)],
+    ['type', 'input[placeholder*="标题"]', title, '--delay', String(titleDelay)],
+  ];
+  for (const cmd of titleAttempts) {
+    const r = await ab(session, cmd, { allowFail: true });
+    if (r.code === 0) {
+      titleTyped = true;
+      break;
+    }
   }
+  if (!titleTyped) {
+    await ab(
+      session,
+      [
+        'eval',
+        `(() => {
+          const el = document.querySelector('input[placeholder*="标题"]') || document.querySelector('input[maxlength]');
+          if (!el) return 'NO_TITLE_INPUT';
+          el.focus();
+          el.value = ${JSON.stringify(title)};
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          return 'OK';
+        })()`,
+      ],
+      { allowFail: true }
+    );
+  }
+
+  if (humanize) humanTrace.push(await humanPause(session, 900, 2600, 'pause_after_title'));
+
+  // 8) Fill ProseMirror body (humanized typing first) + readback
+  await ab(
+    session,
+    [
+      'eval',
+      `(() => {
+        const root =
+          document.querySelector('.ProseMirror[contenteditable="true"]') ||
+          document.querySelector('[contenteditable="true"].ProseMirror') ||
+          document.querySelector('.ProseMirror');
+        if (!root) return 'NO_PM';
+        root.focus();
+        root.innerHTML = '';
+        root.dispatchEvent(new Event('input', { bubbles: true }));
+        return 'OK';
+      })()`,
+    ],
+    { allowFail: true }
+  );
+
+  const bodyDelay = randInt(55, 95);
+  const bodyAttempts = [
+    ['type', '.ProseMirror[contenteditable="true"]', body, '--delay', String(bodyDelay)],
+    ['type', '.ProseMirror', body, '--delay', String(bodyDelay)],
+  ];
+  let bodyTyped = false;
+  for (const cmd of bodyAttempts) {
+    const r = await ab(session, cmd, { allowFail: true });
+    if (r.code === 0) {
+      bodyTyped = true;
+      break;
+    }
+  }
+  if (!bodyTyped) {
+    const fill = await ab(session, ['eval', jsFillProseMirror(body)]);
+    const fillJson = parseFirstJsonObject(fill.stdout) || {};
+    if (!fillJson.ok) {
+      throw new Error(`Failed to fill ProseMirror: ${fillJson.error || 'unknown'}`);
+    }
+  }
+
+  if (humanize) humanTrace.push(await humanPause(session, 1500, 4200, 'pause_after_body'));
 
   const rb = await ab(session, ['eval', jsReadback()]);
   const rbJson = parseFirstJsonObject(rb.stdout) || {};
@@ -491,20 +798,102 @@ async function main(argv) {
       payload: payloadPath,
       mode,
       content_checks: contentChecks,
+      anti_risk: {
+        ...antiRisk,
+        warnings,
+        trace: humanTrace,
+      },
       note: 'Run again with --confirm to actually click publish.',
     };
     console.log(JSON.stringify(out, null, 2));
     return;
   }
 
+  const profileKey = profile ? `profile:${path.resolve(profile)}` : `session:${session || 'default'}`;
+  const existing = await readJsonSafe(rateLogPath, { entries: [] });
+  const entries = normalizeRateEntries(existing);
+  const rateGate = checkPublishRateGate(entries, {
+    profileKey,
+    minIntervalMinutes,
+    maxPostsPerDay,
+  });
+  if (!rateGate.ok) {
+    const out = {
+      task: 'xhs_publish_auto',
+      ok: false,
+      stage: 'risk_gate',
+      error: `Risk gate blocked publish: ${rateGate.reason}`,
+      payload: payloadPath,
+      mode,
+      anti_risk: {
+        ...antiRisk,
+        profile_key: profileKey,
+        rate_gate: rateGate,
+        warnings,
+        trace: humanTrace,
+      },
+    };
+    console.log(JSON.stringify(out, null, 2));
+    process.exitCode = 2;
+    return;
+  }
+
+  if (humanize) humanTrace.push(await humanPause(session, 2500, 7000, 'pause_before_publish_click'));
+
   // 10) Click publish (strict button name)
   await ab(session, ['find', 'role', 'button', 'click', '--name', '发布'], { allowFail: true });
   await ab(session, ['find', 'role', 'button', 'click', '--name', '发布笔记'], { allowFail: true });
-  await ab(session, ['wait', '--load', 'networkidle']);
-  await ab(session, ['wait', 1200]);
+  await sleep(800);
 
-  const url = await ab(session, ['get', 'url']);
-  const resultUrl = str(url.stdout);
+  const publishPoll = await pollPublishSuccessUrl(session, {
+    maxAttempts: publishPollAttempts,
+    intervalMs: publishPollIntervalMs,
+  });
+  if (!publishPoll.ok) {
+    const out = {
+      task: 'xhs_publish_auto',
+      ok: false,
+      published: false,
+      stage: 'publish_verify',
+      error: 'Publish submitted, but success URL was not observed within bounded polling window.',
+      result_url: publishPoll.last_url || null,
+      payload: payloadPath,
+      mode,
+      content_checks: contentChecks,
+      anti_risk: {
+        ...antiRisk,
+        profile_key: profileKey,
+        rate_gate: rateGate,
+        warnings,
+        trace: humanTrace,
+        publish_success_poll_result: publishPoll,
+      },
+    };
+    console.log(JSON.stringify(out, null, 2));
+    process.exitCode = 2;
+    return;
+  }
+  const resultUrl = publishPoll.url;
+  const publishedAt = nowISO();
+  let rateLogUpdated = false;
+
+  try {
+    const nextEntries = entries
+      .filter((x) => x && Number.isFinite(Number(x.ts)))
+      .filter((x) => Date.now() - Number(x.ts) <= 30 * 24 * 60 * 60 * 1000);
+    nextEntries.push({
+      ts: Date.now(),
+      iso: publishedAt,
+      profile_key: profileKey,
+      mode,
+      payload: path.resolve(payloadPath),
+      result_url: resultUrl || null,
+    });
+    await writeJsonAtomic(rateLogPath, { entries: nextEntries.slice(-500) });
+    rateLogUpdated = true;
+  } catch (e) {
+    warnings.push(`Failed to update rate log: ${e?.message || String(e)}`);
+  }
 
   const out = {
     task: 'xhs_publish_auto',
@@ -515,6 +904,16 @@ async function main(argv) {
     payload: payloadPath,
     mode,
     content_checks: contentChecks,
+    anti_risk: {
+      ...antiRisk,
+      profile_key: profileKey,
+      rate_gate: rateGate,
+      rate_log_updated: rateLogUpdated,
+      published_at: publishedAt,
+      warnings,
+      trace: humanTrace,
+      publish_success_poll_result: publishPoll,
+    },
     warning:
       'Post-publish readback is best-effort and depends on current creator center routes. If needed, open note manager and re-open edit page to verify.',
   };

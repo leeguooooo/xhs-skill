@@ -22,7 +22,7 @@ Usage:
   xhs-skill cookies status --in <cookiesJsonPath>
 
 Notes:
-  - QR decode currently supports PNG input (agent-browser should save screenshots as PNG).
+  - QR decode currently supports PNG input (agent-browser-stealth should save screenshots as PNG).
   - cookies JSON can be either an array of cookies or an object containing {cookies:[...]}.
 `;
 }

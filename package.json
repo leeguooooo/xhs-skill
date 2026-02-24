@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Skill-first Xiaohongshu workflows (browser automation delegated to agent-browser)",
+  "description": "Skill-first Xiaohongshu workflows (browser automation delegated to agent-browser-stealth)",
   "bin": {
     "xhs-skill": "./bin/xhs-skill.mjs"
   },

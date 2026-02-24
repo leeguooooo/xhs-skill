@@ -1,6 +1,6 @@
 ---
 name: xhs-skill
-description: 小红书（创作者中心）登录拿 cookies、发布笔记、导出数据的单一入口技能（浏览器交互委托 agent-browser）
+description: 小红书（创作者中心）登录拿 cookies、发布笔记、导出数据的单一入口技能（浏览器交互委托 agent-browser-stealth）
 metadata: {"openclaw":{"emoji":"📌","stage":"workflow"}}
 ---
 
@@ -8,12 +8,13 @@ metadata: {"openclaw":{"emoji":"📌","stage":"workflow"}}
 
 约束：
 
-- 所有浏览器交互（打开页面/点击/输入/上传/截图/登录/导出）全部委托 `agent-browser`。
+- 所有浏览器交互（打开页面/点击/输入/上传/截图/登录/导出）全部委托 `agent-browser-stealth`。
+- 禁止使用 `agent-browser`（旧通道禁用，统一使用 `agent-browser-stealth`）。
 - 所有敏感数据（cookies、导出文件、截图）只落地在本机 `data/` 目录，不要粘贴到聊天里。
 
 执行硬约束（稳定性）：
 
-- 同一 `agent-browser` session 禁止并发操作（串行执行），否则容易触发 `os error 35` 假失败。
+- 同一 `agent-browser-stealth` session 禁止并发操作（串行执行），否则容易触发 `os error 35` 假失败。
 - `snapshot` 的 ref 会漂移：关键动作前后必须重抓 `snapshot -i`，并用 `placeholder/role/text` 做二次定位兜底。
 - 扫码不等于登录成功；必须做后验校验（见下方 A 节“登录成功判定”）。
 
@@ -25,7 +26,7 @@ cd skills/xhs-skill
 npm i
 ```
 
-说明：`npm i` 仅用于本技能自带的本地 CLI（二维码解码、cookies 工具）。如果你不需要解码二维码/转换 cookies，也可以只用 `agent-browser` 完成扫码与导出。
+说明：`npm i` 仅用于本技能自带的本地 CLI（二维码解码、cookies 工具）。如果你不需要解码二维码/转换 cookies，也可以只用 `agent-browser-stealth` 完成扫码与导出。
 
 ## 目录约定（本机）
 
@@ -45,12 +46,12 @@ mkdir -p data
 
 目标：登录小红书创作者中心并导出 cookies，避免频繁重复登录。
 
-1. 用 `agent-browser` 打开登录页：
+1. 用 `agent-browser-stealth` 打开登录页：
 
 - `https://creator.xiaohongshu.com/login`
 - 若默认展示「手机号/验证码登录」，点击「扫码」切换到二维码视图
 
-2. 让 `agent-browser` 截图保存二维码（PNG）到 `data/xhs_login_qr.png`
+2. 让 `agent-browser-stealth` 截图保存二维码（PNG）到 `data/xhs_login_qr.png`
 
 3. （可选）用本地 CLI 解码二维码文本并打印 ASCII 二维码：
 
@@ -76,7 +77,7 @@ OpenClaw 回传规范（强制）：
 4. 用小红书 App 扫码完成登录后，导出 cookies 到 `data/raw_cookies.json`（不走 DevTools）：
 
 ```bash
-agent-browser cookies --json > ./data/raw_cookies.json
+agent-browser-stealth cookies --json > ./data/raw_cookies.json
 ```
 
 5. 归一化 cookies 并保存到 `data/xhs_cookies.json`：
@@ -89,10 +90,10 @@ node ./bin/xhs-skill.mjs cookies status --in ./data/xhs_cookies.json
 5.1 推荐用脚本做后验校验（可执行门禁）：
 
 ```bash
-# 例：先让 agent-browser 记录当前 URL 与后台探测后的 URL
-CURRENT_URL="$(agent-browser get url)"
-agent-browser open https://creator.xiaohongshu.com/creator/home
-PROBE_FINAL_URL="$(agent-browser get url)"
+# 例：先让 agent-browser-stealth 记录当前 URL 与后台探测后的 URL
+CURRENT_URL="$(agent-browser-stealth get url)"
+agent-browser-stealth open https://creator.xiaohongshu.com/creator/home
+PROBE_FINAL_URL="$(agent-browser-stealth get url)"
 
 node ./scripts/verify_login.mjs \
   --cookies ./data/xhs_cookies.json \
@@ -138,8 +139,39 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 
 失败回退：
 
-- 二维码解码失败：通常是没有切到扫码视图或二维码太小，让 `agent-browser` 放大后重新截图（仍为 PNG）。
+- 二维码解码失败：通常是没有切到扫码视图或二维码太小，让 `agent-browser-stealth` 放大后重新截图（仍为 PNG）。
 - cookies 归一化失败：保留原始 `data/raw_cookies.json`，后续再扩展兼容分支。
+
+## A1. 防封/限流运行规范（强制）
+
+核心结论：小红书风控主要看“节奏 + 指纹 + 行为 + IP + 账号权重”。工具本身不是主因，使用方式才是主因。
+
+强制策略：
+
+1. 真人节奏：
+- 禁止连续无停顿点击/填写；关键动作之间必须随机停顿（建议 `1.2s~7s`）。
+- 输入优先 `type --delay`（逐字），避免全量瞬时 `fill`。
+
+2. 固定指纹：
+- 运行发布脚本时优先固定 `--profile`，并启用 `--headed`。
+- 推荐同一账号长期复用同一个 profile 目录，不要每次新建临时环境。
+
+3. 发布频率门禁：
+- 同一 profile 默认 `24h <= 3` 篇。
+- 两次发布最小间隔默认 `30` 分钟。
+- 命中门禁必须中止，不允许强发。
+
+4. 发布前预热行为：
+- 先做一次短时正常浏览（首页/创作者后台停留 + 滚动），再进入发布页。
+- 禁止“打开页面后立刻提交”。
+
+5. 网络与设备：
+- 禁止机房 IP / 高频切换代理。
+- 优先家庭网络或手机热点；同账号尽量保持设备/IP 稳定。
+
+6. 被限流后的处理：
+- 限流：停自动化，回归手动正常使用 `3~7` 天。
+- 封号：仅能申诉；换号时要同时更换 `profile + IP + 设备环境`。
 
 ## B. 发布笔记（图文/视频）
 
@@ -195,10 +227,24 @@ node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --mod
 
 ```bash
 # 默认只把内容填好并做读回校验，不会点“发布”
-node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json --mode hot --session xhs --json
+node ./scripts/publish_from_payload.mjs \
+  --payload ./data/publish_payload.json \
+  --mode hot \
+  --session xhs \
+  --profile ~/.xhs-profile \
+  --json
 
-# 确认无误后再加 --confirm 真正提交
-node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json --mode hot --session xhs --confirm --json
+# 确认无误后再加 --confirm 真正提交（会执行频率门禁）
+node ./scripts/publish_from_payload.mjs \
+  --payload ./data/publish_payload.json \
+  --mode hot \
+  --session xhs \
+  --profile ~/.xhs-profile \
+  --confirm \
+  --min-interval-minutes 30 \
+  --max-posts-per-day 3 \
+  --rate-log ./data/publish_rate_log.json \
+  --json
 ```
 
 发布可靠性 Checklist（照这个执行，避免“看似发了其实没发/字段没落库”）：
@@ -209,7 +255,7 @@ node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json --
 - 发布按钮：页面可能有多个“发布”入口，必须点击“可见 + enabled + 文案严格匹配”的主按钮；点击后用 URL/页面状态确认已跳转到成功/管理页。
 - 图片重传：若需要替换，先点“清空”并在弹窗选择“重新上传”；上传后等待缩略图数量稳定再继续。
 - 图片尺寸：截图类 `1280x720` 会让预览很差；发布前用门禁校验图片为竖版 3:4（推荐 `1242x1660`）。
-- 串行：同一 `agent-browser` session 严格串行，必要时 `sleep/wait`，避免 `os error 35` 假失败。
+- 串行：同一 `agent-browser-stealth` session 严格串行，必要时 `sleep/wait`，避免 `os error 35` 假失败。
 
 发布成功闭环（强制）：
 
@@ -221,17 +267,17 @@ node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json --
 1. 用户只给“需求描述”，例如：
 - “一个红色爱心线性 icon，透明背景”
 - “适合美妆笔记的浅色系贴纸风小图标”
-2. 用 `agent-browser` 搜索并挑选 3-5 个候选（优先免版权/可复用来源）。
+2. 用 `agent-browser-stealth` 搜索并挑选 3-5 个候选（优先免版权/可复用来源）。
 2.1 配图“内容一致性”门禁（强烈建议）：
 
-- 截图入库前，先用 `agent-browser get title`/读 `h1` 检查页面内容确实包含目标关键词（否则可能是误点/错页）。
+- 截图入库前，先用 `agent-browser-stealth get title`/读 `h1` 检查页面内容确实包含目标关键词（否则可能是误点/错页）。
 - 需要更强一致性时再上 OCR（可选），但默认先做 `title/h1` 的低成本校验。
-3. 用 `agent-browser` 直接截图保存到：
+3. 用 `agent-browser-stealth` 直接截图保存到：
 - `data/assets/<YYYY-MM-DD>/icons/<name>.png`
 - 把来源 URL 追加到：`data/assets/<YYYY-MM-DD>/sources.txt`
 4. 进入发布页后按常规上传媒体，并在点击“发布/提交”前设置人工确认点（预览无误再发）。
 
-流程（浏览器侧全部由 `agent-browser` 完成）：
+流程（浏览器侧全部由 `agent-browser-stealth` 完成）：
 
 1. 确保已登录（先完成上面的 A，或已有有效登录态）。
 2. 准备并校验 `data/publish_payload.json`（必须 `ok=true`）。
@@ -276,7 +322,7 @@ node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json --
 目标：把创作者中心关键数据导出到 `data/exports/<YYYY-MM-DD>/`，用于后续分析。
 
 1. 确认已登录。
-2. 用 `agent-browser` 进入创作者中心的常用分析页（仪表盘/内容分析/粉丝分析）。
+2. 用 `agent-browser-stealth` 进入创作者中心的常用分析页（仪表盘/内容分析/粉丝分析）。
 3. 每个页面：
 - 优先使用页面自带导出（如有）到 `data/exports/<date>/`
 - 无导出时：保存关键区块截图到同目录
