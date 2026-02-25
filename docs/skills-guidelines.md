@@ -16,7 +16,8 @@
 
 - 不追求“绝对不可 AI 识别”，追求“降低 AI 识别风险”
 - 正文必须包含个人视角 + 具体事实信号（数字/日期/来源）
-- 标签必须来自 `data/tag_registry.json`（建议每日更新），禁止占位标签和自造标签
+- 来源证据必须可追溯：`source.evidence_snippet` + `source.key_facts`
+- 标签与 `post.real_topics` 必须来自 `data/tag_registry.json`（建议每日更新，含 source 元信息），禁止占位标签和自造标签
 
 ## 本地工具约定（Node.js）
 

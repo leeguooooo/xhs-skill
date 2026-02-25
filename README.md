@@ -70,6 +70,9 @@ node ./skills/xhs-skill/scripts/verify_login.mjs \
 node ./skills/xhs-skill/scripts/verify_publish_payload.mjs \
   --in ./data/publish_payload.json \
   --tag-registry ./data/tag_registry.json \
+  --min-registry-tags 12 \
+  --require-source-evidence on \
+  --strict-anti-ai on \
   --mode hot \
   --json
 ```
@@ -86,6 +89,10 @@ node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
   --session xhs \
   --profile ~/.xhs-profile \
   --allow-eval-fallback off \
+  --tag-registry ./data/tag_registry.json \
+  --min-registry-tags 12 \
+  --require-source-evidence on \
+  --strict-anti-ai on \
   --json
 
 # 先在发布页手动选择至少 3 个真实话题，再确认提交
@@ -115,8 +122,9 @@ node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
 
 - 不承诺“100% 不被识别为 AI”，目标是显著降低风险。
 - 文案必须通过 `anti_ai` 门禁：需要个人视角、具体事实信号（数字/日期/来源提及），并规避模板腔。
+- 文案来源必须可追溯：`source.evidence_snippet` + `source.key_facts` 必填。
 - 禁止自动把 `#标签` 直接拼进正文冒充话题。
-- 标签必须来自真实话题池 `data/tag_registry.json`（建议每日更新），禁止自造标签。
+- 标签和 `post.real_topics` 都必须来自真实话题池 `data/tag_registry.json`（建议每日更新），禁止自造标签。
 - 发布前必须在小红书发布页手动选择至少 3 个真实话题，再执行 `--confirm --ack-real-topics`。
 
 示例：准备真实标签池
@@ -125,7 +133,12 @@ node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
 cat > ./data/tag_registry.json <<'JSON'
 {
   "updated_at": "2026-02-24",
-  "tags": ["#AI热点", "#人工智能", "#行业观察", "#科技新闻"]
+  "source": {
+    "platform": "xiaohongshu",
+    "method": "manual_from_publish_topic_picker",
+    "url": "https://creator.xiaohongshu.com/creator/publish"
+  },
+  "tags": ["#AI热点", "#人工智能", "#行业观察", "#科技新闻", "#AI资讯", "#科技观察"]
 }
 JSON
 ```
@@ -133,7 +146,7 @@ JSON
 ## 硬门禁标准（用来挡住“低质发布”）
 
 - 登录：离开 `/login` + 后台页不回跳/不 401 + cookies 含 `web_session`
-- 发布（热点）：标题 8~20 字 + 正文 >= 80 字 + 标签 >= 3 个（且都以 `#` 开头，且在 `tag_registry` 中）+ 有媒体且非“仅截图” + 来源名/URL/日期齐全（`--mode hot` 要求来源日期=当天）+ anti_ai 门禁通过
+- 发布（热点）：标题 8~20 字 + 正文 >= 80 字 + 标签 >= 3 个 + `real_topics >= 3`（两者都必须命中 `tag_registry`）+ 有媒体且非“仅截图” + 来源名/URL/日期 + `source.evidence_snippet` + `source.key_facts` 齐全（`--mode hot` 要求来源日期=当天）+ anti_ai 门禁通过
 
 ## 命令速查
 
@@ -148,10 +161,10 @@ node ./skills/xhs-skill/bin/xhs-skill.mjs cookies normalize --in <raw.json> --ou
 node ./skills/xhs-skill/scripts/verify_login.mjs --cookies <xhs.json> --current-url <url> --probe-final-url <url> --json
 
 # 发布门禁（热点）
-node ./skills/xhs-skill/scripts/verify_publish_payload.mjs --in <payload.json> --tag-registry ./data/tag_registry.json --mode hot --json
+node ./skills/xhs-skill/scripts/verify_publish_payload.mjs --in <payload.json> --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --mode hot --json
 
 # 带防封策略的发布（先不提交）
-node ./skills/xhs-skill/scripts/publish_from_payload.mjs --payload <payload.json> --mode hot --session xhs --profile ~/.xhs-profile --allow-eval-fallback off --json
+node ./skills/xhs-skill/scripts/publish_from_payload.mjs --payload <payload.json> --mode hot --session xhs --profile ~/.xhs-profile --allow-eval-fallback off --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --json
 ```
 
 ## 常见问题（只保留最常见）

@@ -34,4 +34,5 @@ This repository is **skill-first**.
 
 - Do not claim "100% undetectable AI"; only reduce risk with stricter content checks.
 - Require anti-AI style checks (personal perspective + concrete facts, avoid template phrasing).
-- Require real tags from `data/tag_registry.json`; do not fabricate tags or fake topic hashtags.
+- Require source traceability fields (`source.evidence_snippet` + `source.key_facts`).
+- Require real tags and `post.real_topics` from `data/tag_registry.json`; do not fabricate tags or fake topic hashtags.

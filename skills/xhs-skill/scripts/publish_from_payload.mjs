@@ -20,6 +20,7 @@ Usage:
   node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--mode hot] [--session xhs] [--profile ~/.xhs-profile] [--confirm] [--json]
   node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--confirm] [--min-interval-minutes 30] [--max-posts-per-day 3] [--rate-log ./data/publish_rate_log.json]
   node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--humanize on|off] [--headed on|off] [--allow-eval-fallback off] [--ack-real-topics]
+  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--tag-registry ./data/tag_registry.json] [--min-registry-tags 12] [--require-source-evidence on] [--strict-anti-ai on]
 
 Notes:
   - By default this script DOES NOT click "发布". Use --confirm to actually submit.
@@ -368,13 +369,20 @@ function pickBestUploadRef(refs) {
   return best.ref;
 }
 
-async function verifyPayload(payloadPath, mode) {
+async function verifyPayload(payloadPath, mode, { tagRegistryPath, minRegistryTags, requireSourceEvidence, strictAntiAi }) {
   const verifyScript = path.join(__dirname, 'verify_publish_payload.mjs');
   const r = await run(process.execPath, [
     verifyScript,
     '--in',
     payloadPath,
     ...(mode ? ['--mode', mode] : []),
+    ...(tagRegistryPath ? ['--tag-registry', tagRegistryPath] : []),
+    '--min-registry-tags',
+    String(minRegistryTags),
+    '--require-source-evidence',
+    String(!!requireSourceEvidence),
+    '--strict-anti-ai',
+    String(!!strictAntiAi),
     '--json',
   ]);
   const txt = (r.stdout || '').trim();
@@ -514,6 +522,10 @@ async function main(argv) {
       'min-interval-minutes': { type: 'string', default: '30' },
       'max-posts-per-day': { type: 'string', default: '3' },
       'rate-log': { type: 'string', default: './data/publish_rate_log.json' },
+      'tag-registry': { type: 'string', default: './data/tag_registry.json' },
+      'min-registry-tags': { type: 'string', default: '12' },
+      'require-source-evidence': { type: 'string', default: 'on' },
+      'strict-anti-ai': { type: 'string', default: 'on' },
       'ack-real-topics': { type: 'boolean', default: false },
       confirm: { type: 'boolean', default: false },
       json: { type: 'boolean', default: true },
@@ -537,6 +549,10 @@ async function main(argv) {
   const minIntervalMinutes = toPositiveInt(values['min-interval-minutes'], 30);
   const maxPostsPerDay = toPositiveInt(values['max-posts-per-day'], 3);
   const rateLogPath = str(values['rate-log']) || './data/publish_rate_log.json';
+  const tagRegistryPath = str(values['tag-registry']) || './data/tag_registry.json';
+  const minRegistryTags = toPositiveInt(values['min-registry-tags'], 12);
+  const requireSourceEvidence = parseToggle(values['require-source-evidence'], true);
+  const strictAntiAi = parseToggle(values['strict-anti-ai'], true);
   const ackRealTopics = !!values['ack-real-topics'];
   const publishPollAttempts = 25;
   const publishPollIntervalMs = 1200;
@@ -555,6 +571,10 @@ async function main(argv) {
     min_interval_minutes: minIntervalMinutes,
     max_posts_per_day: maxPostsPerDay,
     rate_log: path.resolve(rateLogPath),
+    tag_registry: path.resolve(tagRegistryPath),
+    min_registry_tags: minRegistryTags,
+    require_source_evidence: requireSourceEvidence,
+    strict_anti_ai: strictAntiAi,
     publish_success_poll: {
       max_attempts: publishPollAttempts,
       interval_ms: publishPollIntervalMs,
@@ -579,7 +599,12 @@ async function main(argv) {
   }
 
   // 1) Validate payload (gate)
-  const verified = await verifyPayload(payloadPath, mode === 'hot' ? 'hot' : 'normal');
+  const verified = await verifyPayload(payloadPath, mode === 'hot' ? 'hot' : 'normal', {
+    tagRegistryPath,
+    minRegistryTags,
+    requireSourceEvidence,
+    strictAntiAi,
+  });
   if (!verified.result || verified.result.ok !== true) {
     const out = {
       task: 'xhs_publish_auto',

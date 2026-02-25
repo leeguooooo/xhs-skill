@@ -16,12 +16,15 @@ Payload JSON example:
   "source": {
     "name": "央视新闻",
     "url": "https://...",
-    "date": "2026-02-12"
+    "date": "2026-02-12",
+    "evidence_snippet": "2月12日该媒体报道：......",
+    "key_facts": ["融资规模约300亿美元", "时间点为2026年2月12日"]
   },
   "post": {
     "title": "标题",
     "body": "正文",
     "tags": ["#热点", "#小红书"],
+    "real_topics": ["#人工智能", "#AI热点", "#科技新闻"],
     "media": ["/abs/path/cover.png"]
   }
 }
@@ -130,6 +133,20 @@ function parseDateSafe(iso) {
   return d;
 }
 
+function toPositiveInt(value, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+function parseToggle(value, fallback = true) {
+  const s = String(value ?? '').trim().toLowerCase();
+  if (!s) return fallback;
+  if (['1', 'true', 'on', 'yes', 'y'].includes(s)) return true;
+  if (['0', 'false', 'off', 'no', 'n'].includes(s)) return false;
+  return fallback;
+}
+
 function daysSince(isoDate) {
   const d = parseDateSafe(isoDate);
   if (!d) return null;
@@ -153,6 +170,7 @@ async function loadTagRegistry(filePath) {
       exists: true,
       path: filePath,
       updated_at: str(data?.updated_at) || null,
+      source: data?.source && typeof data.source === 'object' ? data.source : null,
       tags: normalized,
     };
   } catch {
@@ -160,6 +178,7 @@ async function loadTagRegistry(filePath) {
       exists: false,
       path: filePath,
       updated_at: null,
+      source: null,
       tags: [],
     };
   }
@@ -174,21 +193,26 @@ function hasPersonalVoice(body) {
   return /(我|我们|我觉得|我观察|我测了|我试了|我踩坑|我自己|这周我)/.test(String(body || ''));
 }
 
-function hasConcreteSignals({ body, sourceName, sourceDate }) {
+function hasConcreteSignals({ body, sourceName, sourceDate, strictAntiAi }) {
   const s = String(body || '');
   const digitCount = (s.match(/\d/g) || []).length;
   const hasDateLike = /\d{4}[年\-/.]\d{1,2}[月\-/.]\d{1,2}日?/.test(s) || /\d{1,2}月\d{1,2}日/.test(s);
   const hasAmountLike = /\d+\s*(亿|万|%|美元|人民币|条|家|款|次)/.test(s);
   const hasSourceMention = !!sourceName && s.includes(sourceName);
   const hasWeekMention = /(这周|本周|今天|昨日|刚刚)/.test(s) || (!!sourceDate && s.includes(sourceDate));
+  const hasHardFactSignal = digitCount >= 2 || hasDateLike || hasAmountLike;
+  const signalCount = [digitCount >= 2, hasDateLike, hasAmountLike, hasSourceMention, hasWeekMention].filter(Boolean).length;
   return {
-    ok: digitCount >= 2 || hasDateLike || hasAmountLike || hasSourceMention || hasWeekMention,
+    ok: strictAntiAi ? hasSourceMention && hasHardFactSignal && signalCount >= 2 : signalCount >= 1,
     value: {
       digit_count: digitCount,
       has_date_like: hasDateLike,
       has_amount_like: hasAmountLike,
       has_source_mention: hasSourceMention,
       has_week_mention: hasWeekMention,
+      has_hard_fact_signal: hasHardFactSignal,
+      signal_count: signalCount,
+      strict_anti_ai: strictAntiAi,
     },
   };
 }
@@ -244,16 +268,20 @@ async function checkMediaDims(media) {
   };
 }
 
-async function buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags }) {
+async function buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags, minRegistryTags, requireSourceEvidence, strictAntiAi }) {
   const topic = str(payload?.topic);
   const sourceName = str(payload?.source?.name);
   const sourceUrl = str(payload?.source?.url);
   const sourceDate = str(payload?.source?.date);
+  const sourceEvidenceSnippet = str(payload?.source?.evidence_snippet);
+  const sourceKeyFacts = uniqueList(pickArray(payload?.source?.key_facts).map((x) => str(x)).filter(Boolean));
 
   const title = str(payload?.post?.title);
   const body = str(payload?.post?.body);
   const tagsRaw = pickArray(payload?.post?.tags).map((x) => normalizeTag(x)).filter(Boolean);
   const tags = tagsRaw.filter((x) => x.startsWith('#'));
+  const realTopicsRaw = pickArray(payload?.post?.real_topics).map((x) => normalizeTag(x)).filter(Boolean);
+  const realTopics = realTopicsRaw.filter((x) => x.startsWith('#'));
   const media = pickArray(payload?.post?.media).map((x) => str(x)).filter(Boolean);
 
   const titleLen = [...title].length;
@@ -268,14 +296,39 @@ async function buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags }) 
   const linkInTags = tagsRaw.some((t) => containsLinkLike(t));
   const linkInMediaPath = media.some((p) => containsLinkLike(p) || String(p).includes('://'));
   const duplicateTagCount = tagsRaw.length - uniqueList(tagsRaw).length;
+  const duplicateRealTopicCount = realTopicsRaw.length - uniqueList(realTopicsRaw).length;
   const placeholderTags = hasPlaceholderTag(tagsRaw);
+  const placeholderRealTopics = hasPlaceholderTag(realTopicsRaw);
   const aiTemplateHits = hasAiTemplateStyle(body);
   const personalVoice = hasPersonalVoice(body);
-  const concreteSignals = hasConcreteSignals({ body, sourceName, sourceDate });
+  const concreteSignals = hasConcreteSignals({ body, sourceName, sourceDate, strictAntiAi });
   const registryTagSet = new Set((tagRegistry?.tags || []).map((x) => str(x).toLowerCase()));
   const unverifiedTags = tags.filter((t) => !registryTagSet.has(str(t).toLowerCase()));
+  const unverifiedRealTopics = realTopics.filter((t) => !registryTagSet.has(str(t).toLowerCase()));
   const registryAgeDays = daysSince(tagRegistry?.updated_at);
   const registryFresh = registryAgeDays !== null && registryAgeDays >= 0 && registryAgeDays <= 7;
+  const registrySourcePlatform = str(tagRegistry?.source?.platform).toLowerCase();
+  const registrySourceMethod = str(tagRegistry?.source?.method);
+
+  const sourceEvidenceOk =
+    !requireSourceEvidence ||
+    (sourceEvidenceSnippet.length >= 16 &&
+      sourceEvidenceSnippet.length <= 180 &&
+      !containsLinkLike(sourceEvidenceSnippet) &&
+      (!!sourceName && sourceEvidenceSnippet.includes(sourceName)));
+
+  const sourceKeyFactLengthBad = sourceKeyFacts.filter((x) => x.length < 8 || x.length > 80);
+  const sourceKeyFactLinkBad = sourceKeyFacts.filter((x) => containsLinkLike(x));
+  const sourceKeyFactHasDateOrNumber = sourceKeyFacts.some(
+    (x) => /\d/.test(x) || /\d{4}[年\-/.]\d{1,2}[月\-/.]\d{1,2}日?/.test(x) || /\d{1,2}月\d{1,2}日/.test(x)
+  );
+  const sourceKeyFactsOk =
+    !requireSourceEvidence ||
+    (sourceKeyFacts.length >= 2 &&
+      sourceKeyFacts.length <= 5 &&
+      sourceKeyFactLengthBad.length === 0 &&
+      sourceKeyFactLinkBad.length === 0 &&
+      sourceKeyFactHasDateOrNumber);
 
   const checks = {
     has_topic: {
@@ -285,6 +338,24 @@ async function buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags }) 
     has_source: {
       ok: !!sourceName && isHttpUrl(sourceUrl) && isValidDateYYYYMMDD(sourceDate),
       value: { name: sourceName || null, url: sourceUrl || null, date: sourceDate || null },
+    },
+    source_evidence_snippet_ok: {
+      ok: sourceEvidenceOk,
+      value: {
+        required: requireSourceEvidence,
+        length: sourceEvidenceSnippet.length,
+        contains_source_name: !!sourceName && sourceEvidenceSnippet.includes(sourceName),
+      },
+    },
+    source_key_facts_ok: {
+      ok: sourceKeyFactsOk,
+      value: {
+        required: requireSourceEvidence,
+        count: sourceKeyFacts.length,
+        bad_length: sourceKeyFactLengthBad,
+        has_link_like: sourceKeyFactLinkBad,
+        has_date_or_number_signal: sourceKeyFactHasDateOrNumber,
+      },
     },
     title_ok: {
       ok: titleLen >= 8 && titleLen <= 20,
@@ -312,6 +383,35 @@ async function buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags }) 
         hit: placeholderTags,
       },
     },
+    real_topics_ok: {
+      ok: realTopics.length >= 3 && realTopics.length <= 8 && duplicateRealTopicCount === 0,
+      value: { count: realTopics.length, duplicate_count: duplicateRealTopicCount, real_topics: realTopics },
+    },
+    real_topics_not_placeholder: {
+      ok: placeholderRealTopics.length === 0,
+      value: {
+        hit: placeholderRealTopics,
+      },
+    },
+    tag_registry_meta_ok: {
+      ok:
+        tagRegistry.exists &&
+        registryFresh &&
+        tagRegistry.tags.length >= minRegistryTags &&
+        registrySourcePlatform === 'xiaohongshu' &&
+        !!registrySourceMethod,
+      value: {
+        registry_exists: !!tagRegistry.exists,
+        registry_path: tagRegistry.path,
+        registry_updated_at: tagRegistry.updated_at,
+        registry_age_days: registryAgeDays,
+        registry_fresh_within_days_7: registryFresh,
+        registry_tag_count: tagRegistry.tags.length,
+        min_registry_tags: minRegistryTags,
+        source_platform: registrySourcePlatform || null,
+        source_method: registrySourceMethod || null,
+      },
+    },
     tags_from_registry: {
       ok: allowUnverifiedTags || (tagRegistry.exists && registryFresh && unverifiedTags.length === 0),
       value: {
@@ -323,6 +423,19 @@ async function buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags }) 
         registry_fresh_within_days_7: registryFresh,
         registry_tag_count: tagRegistry.tags.length,
         unverified_tags: unverifiedTags,
+      },
+    },
+    real_topics_from_registry: {
+      ok: allowUnverifiedTags || (tagRegistry.exists && registryFresh && unverifiedRealTopics.length === 0),
+      value: {
+        allow_unverified_tags: allowUnverifiedTags,
+        registry_exists: !!tagRegistry.exists,
+        registry_path: tagRegistry.path,
+        registry_updated_at: tagRegistry.updated_at,
+        registry_age_days: registryAgeDays,
+        registry_fresh_within_days_7: registryFresh,
+        registry_tag_count: tagRegistry.tags.length,
+        unverified_real_topics: unverifiedRealTopics,
       },
     },
     no_links_in_content: {
@@ -347,6 +460,13 @@ async function buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags }) 
       value: { has_personal_voice: personalVoice },
     },
     anti_ai_concrete_signals: concreteSignals,
+    anti_ai_source_mentioned_in_body: {
+      ok: !!sourceName && body.includes(sourceName),
+      value: {
+        source_name: sourceName || null,
+        mentioned: !!sourceName && body.includes(sourceName),
+      },
+    },
     anti_ai_template_phrase: {
       ok: aiTemplateHits.length === 0,
       value: {
@@ -370,6 +490,9 @@ async function main(argv) {
       mode: { type: 'string', default: 'normal' },
       'tag-registry': { type: 'string', default: './data/tag_registry.json' },
       'allow-unverified-tags': { type: 'boolean', default: false },
+      'min-registry-tags': { type: 'string', default: '12' },
+      'require-source-evidence': { type: 'string', default: 'on' },
+      'strict-anti-ai': { type: 'string', default: 'on' },
       json: { type: 'boolean', default: true },
       help: { type: 'boolean', default: false },
     },
@@ -391,7 +514,16 @@ async function main(argv) {
   const tagRegistryPath = str(values['tag-registry']) || './data/tag_registry.json';
   const tagRegistry = await loadTagRegistry(tagRegistryPath);
   const allowUnverifiedTags = !!values['allow-unverified-tags'];
-  const checks = await buildChecks(payload, mode, { tagRegistry, allowUnverifiedTags });
+  const minRegistryTags = toPositiveInt(values['min-registry-tags'], 12);
+  const requireSourceEvidence = parseToggle(values['require-source-evidence'], true);
+  const strictAntiAi = parseToggle(values['strict-anti-ai'], true);
+  const checks = await buildChecks(payload, mode, {
+    tagRegistry,
+    allowUnverifiedTags,
+    minRegistryTags,
+    requireSourceEvidence,
+    strictAntiAi,
+  });
 
   const missing = Object.entries(checks)
     .filter(([, item]) => !item.ok)
@@ -404,7 +536,10 @@ async function main(argv) {
     policy: {
       tag_registry_path: tagRegistry.path,
       allow_unverified_tags: allowUnverifiedTags,
+      min_registry_tags: minRegistryTags,
+      require_source_evidence: requireSourceEvidence,
       anti_ai_style_required: true,
+      strict_anti_ai: strictAntiAi,
     },
     checks,
     missing,
