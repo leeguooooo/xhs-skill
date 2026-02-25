@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const BROWSER_BIN = 'agent-browser-stealth';
+const DEFAULT_VERIFY_POLICY_PATH = path.resolve(__dirname, '../config/verify_publish_policy.json');
+const DEFAULT_REVIEW_POLICY_PATH = path.resolve(__dirname, '../config/review_policy.json');
+const DEFAULT_REVIEW_TAXONOMY_PATH = path.resolve(__dirname, '../config/review_taxonomy.json');
 
 function usage() {
   return `publish_from_payload
@@ -20,7 +23,8 @@ Usage:
   node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--mode hot] [--session xhs] [--profile ~/.xhs-profile] [--confirm] [--json]
   node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--confirm] [--min-interval-minutes 30] [--max-posts-per-day 3] [--rate-log ./data/publish_rate_log.json]
   node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--humanize on|off] [--headed on|off] [--allow-eval-fallback off] [--ack-real-topics]
-  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--tag-registry ./data/tag_registry.json] [--min-registry-tags 12] [--require-source-evidence on] [--strict-anti-ai on]
+  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--policy ./skills/xhs-skill/config/verify_publish_policy.json] [--tag-registry ./data/tag_registry.json] [--min-registry-tags 12] [--require-source-evidence on] [--strict-anti-ai on]
+  node ./scripts/publish_from_payload.mjs --payload ./data/publish_payload.json [--review on|off] [--review-policy ./skills/xhs-skill/config/review_policy.json] [--review-taxonomy ./skills/xhs-skill/config/review_taxonomy.json] [--review-ai-provider auto|openai|none] [--review-require-ai on|off]
 
 Notes:
   - By default this script DOES NOT click "发布". Use --confirm to actually submit.
@@ -369,13 +373,14 @@ function pickBestUploadRef(refs) {
   return best.ref;
 }
 
-async function verifyPayload(payloadPath, mode, { tagRegistryPath, minRegistryTags, requireSourceEvidence, strictAntiAi }) {
+async function verifyPayload(payloadPath, mode, { policyPath, tagRegistryPath, minRegistryTags, requireSourceEvidence, strictAntiAi }) {
   const verifyScript = path.join(__dirname, 'verify_publish_payload.mjs');
   const r = await run(process.execPath, [
     verifyScript,
     '--in',
     payloadPath,
     ...(mode ? ['--mode', mode] : []),
+    ...(policyPath ? ['--policy', policyPath] : []),
     ...(tagRegistryPath ? ['--tag-registry', tagRegistryPath] : []),
     '--min-registry-tags',
     String(minRegistryTags),
@@ -383,6 +388,25 @@ async function verifyPayload(payloadPath, mode, { tagRegistryPath, minRegistryTa
     String(!!requireSourceEvidence),
     '--strict-anti-ai',
     String(!!strictAntiAi),
+    '--json',
+  ]);
+  const txt = (r.stdout || '').trim();
+  const parsed = txt ? parseFirstJsonObject(txt) : null;
+  return { code: r.code, result: parsed, raw: { stdout: r.stdout, stderr: r.stderr } };
+}
+
+async function reviewPayload(payloadPath, mode, { reviewPolicyPath, reviewTaxonomyPath, reviewAiProvider, reviewRequireAi }) {
+  const reviewScript = path.join(__dirname, 'review_publish_payload.mjs');
+  const r = await run(process.execPath, [
+    reviewScript,
+    '--in',
+    payloadPath,
+    ...(mode ? ['--mode', mode] : []),
+    ...(reviewPolicyPath ? ['--policy', reviewPolicyPath] : []),
+    ...(reviewTaxonomyPath ? ['--taxonomy', reviewTaxonomyPath] : []),
+    ...(reviewAiProvider ? ['--ai-provider', reviewAiProvider] : []),
+    '--require-ai',
+    String(!!reviewRequireAi),
     '--json',
   ]);
   const txt = (r.stdout || '').trim();
@@ -514,6 +538,12 @@ async function main(argv) {
     options: {
       payload: { type: 'string' },
       mode: { type: 'string', default: 'normal' },
+      policy: { type: 'string', default: DEFAULT_VERIFY_POLICY_PATH },
+      review: { type: 'string', default: 'on' },
+      'review-policy': { type: 'string', default: DEFAULT_REVIEW_POLICY_PATH },
+      'review-taxonomy': { type: 'string', default: DEFAULT_REVIEW_TAXONOMY_PATH },
+      'review-ai-provider': { type: 'string', default: 'auto' },
+      'review-require-ai': { type: 'string', default: 'off' },
       session: { type: 'string' },
       profile: { type: 'string' },
       headed: { type: 'string', default: 'on' },
@@ -549,6 +579,12 @@ async function main(argv) {
   const minIntervalMinutes = toPositiveInt(values['min-interval-minutes'], 30);
   const maxPostsPerDay = toPositiveInt(values['max-posts-per-day'], 3);
   const rateLogPath = str(values['rate-log']) || './data/publish_rate_log.json';
+  const policyPath = str(values.policy);
+  const reviewEnabled = parseToggle(values.review, true);
+  const reviewPolicyPath = str(values['review-policy']) || DEFAULT_REVIEW_POLICY_PATH;
+  const reviewTaxonomyPath = str(values['review-taxonomy']) || DEFAULT_REVIEW_TAXONOMY_PATH;
+  const reviewAiProvider = str(values['review-ai-provider'] || 'auto').toLowerCase();
+  const reviewRequireAi = parseToggle(values['review-require-ai'], false);
   const tagRegistryPath = str(values['tag-registry']) || './data/tag_registry.json';
   const minRegistryTags = toPositiveInt(values['min-registry-tags'], 12);
   const requireSourceEvidence = parseToggle(values['require-source-evidence'], true);
@@ -568,6 +604,12 @@ async function main(argv) {
     humanize,
     allow_eval_fallback: allowEvalFallback,
     ack_real_topics: ackRealTopics,
+    verify_policy: policyPath ? path.resolve(policyPath) : null,
+    review_enabled: reviewEnabled,
+    review_policy: reviewPolicyPath ? path.resolve(reviewPolicyPath) : null,
+    review_taxonomy: reviewTaxonomyPath ? path.resolve(reviewTaxonomyPath) : null,
+    review_ai_provider: reviewAiProvider,
+    review_require_ai: reviewRequireAi,
     min_interval_minutes: minIntervalMinutes,
     max_posts_per_day: maxPostsPerDay,
     rate_log: path.resolve(rateLogPath),
@@ -598,8 +640,9 @@ async function main(argv) {
     warnings.push('No --profile provided. Prefer fixed profile to reduce new-device risk.');
   }
 
-  // 1) Validate payload (gate)
+  // 1) Validate payload schema/quality gate
   const verified = await verifyPayload(payloadPath, mode === 'hot' ? 'hot' : 'normal', {
+    policyPath,
     tagRegistryPath,
     minRegistryTags,
     requireSourceEvidence,
@@ -618,7 +661,31 @@ async function main(argv) {
     return;
   }
 
-  // 2) Load payload
+  // 2) AI + rule layered review gate (fail-closed)
+  let reviewed = null;
+  if (reviewEnabled) {
+    reviewed = await reviewPayload(payloadPath, mode === 'hot' ? 'hot' : 'normal', {
+      reviewPolicyPath,
+      reviewTaxonomyPath,
+      reviewAiProvider,
+      reviewRequireAi,
+    });
+    if (!reviewed.result || reviewed.result.ok !== true) {
+      const out = {
+        task: 'xhs_publish_auto',
+        ok: false,
+        stage: 'review_gate',
+        payload: payloadPath,
+        review: reviewed.result,
+        anti_risk: antiRisk,
+      };
+      console.log(JSON.stringify(out, null, 2));
+      process.exitCode = 2;
+      return;
+    }
+  }
+
+  // 3) Load payload
   const raw = await readFile(payloadPath, 'utf8');
   const payload = JSON.parse(raw);
   const title = str(payload?.post?.title);
@@ -645,11 +712,11 @@ async function main(argv) {
     humanTrace.push(...warmup);
   }
 
-  // 3) Open publish page
+  // 4) Open publish page
   await ab(session, ['open', 'https://creator.xiaohongshu.com/creator/publish']);
   await ab(session, ['wait', '--load', 'networkidle']);
 
-  // 4) Ensure 图文 mode (best-effort)
+  // 5) Ensure 图文 mode (best-effort)
   const tryTab = async (name) => {
     await ab(session, ['find', 'role', 'tab', 'click', '--name', name], { allowFail: true });
     await ab(session, ['find', 'text', name, 'click'], { allowFail: true });
@@ -657,7 +724,7 @@ async function main(argv) {
   await tryTab('图文');
   await tryTab('图文笔记');
 
-  // 5) Preflight: file input should accept images and allow multiple when needed
+  // 6) Preflight: file input should accept images and allow multiple when needed
   const pre = await ab(session, ['eval', jsReadback()]);
   const preJson = parseFirstJsonObject(pre.stdout) || {};
   const inputs = Array.isArray(preJson.file_inputs) ? preJson.file_inputs : [];
@@ -668,7 +735,7 @@ async function main(argv) {
     await ab(session, ['wait', 600]);
   }
 
-  // 6) Upload media
+  // 7) Upload media
   if (media.length === 0) {
     throw new Error('No media in payload. Refuse to publish without images/videos.');
   }
@@ -693,7 +760,7 @@ async function main(argv) {
   await ab(session, ['wait', Math.min(15000, 1000 * Math.max(2, media.length * 2))]);
   if (humanize) humanTrace.push(await humanPause(session, 1200, 3500, 'pause_after_upload'));
 
-  // 7) Fill title (humanized typing first, direct assignment fallback)
+  // 8) Fill title (humanized typing first, direct assignment fallback)
   const titleDelay = randInt(65, 120);
   await ab(
     session,
@@ -763,7 +830,7 @@ async function main(argv) {
 
   if (humanize) humanTrace.push(await humanPause(session, 900, 2600, 'pause_after_title'));
 
-  // 8) Fill ProseMirror body (humanized typing first) + readback
+  // 9) Fill ProseMirror body (humanized typing first) + readback
   await ab(
     session,
     [
@@ -840,7 +907,7 @@ async function main(argv) {
     throw new Error('Readback failed: link-like content detected. Abort before publish.');
   }
 
-  // 9) Stop here unless explicitly confirmed
+  // 10) Stop here unless explicitly confirmed
   if (!confirm) {
     const out = {
       task: 'xhs_publish_auto',
@@ -849,6 +916,7 @@ async function main(argv) {
       ready_to_publish: true,
       payload: payloadPath,
       mode,
+      review: reviewed?.result || null,
       content_checks: contentChecks,
       anti_risk: {
         ...antiRisk,
@@ -911,7 +979,7 @@ async function main(argv) {
 
   if (humanize) humanTrace.push(await humanPause(session, 2500, 7000, 'pause_before_publish_click'));
 
-  // 10) Click publish (strict button name)
+  // 11) Click publish (strict button name)
   await ab(session, ['find', 'role', 'button', 'click', '--name', '发布'], { allowFail: true });
   await ab(session, ['find', 'role', 'button', 'click', '--name', '发布笔记'], { allowFail: true });
   await sleep(800);
@@ -974,6 +1042,7 @@ async function main(argv) {
     result_url: resultUrl || null,
     payload: payloadPath,
     mode,
+    review: reviewed?.result || null,
     content_checks: contentChecks,
     anti_risk: {
       ...antiRisk,

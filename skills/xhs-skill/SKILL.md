@@ -212,14 +212,21 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 
 ```bash
 # 普通模式
-node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --json
+node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --policy ./config/verify_publish_policy.json --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --json
 
 # 今天热点模式（强制 source.date = 今天）
-node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --mode hot --json
+node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --policy ./config/verify_publish_policy.json --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --mode hot --json
 ```
 
-3. 只有当校验结果 `ok=true` 才允许进入发布页点击“发布/提交”。
-4. 任一校验失败必须中止流程并提示补齐，禁止“只传截图直接发”。
+3. 发布前必须执行内容审核脚本（分层规则 + AI）：
+
+```bash
+node ./scripts/review_publish_payload.mjs --in ./data/publish_payload.json --policy ./config/review_policy.json --taxonomy ./config/review_taxonomy.json --ai-provider auto --require-ai off --mode hot --json
+```
+
+4. 只有当校验和审核结果都 `ok=true` 才允许进入发布页点击“发布/提交”。
+   校验策略在 `./config/verify_publish_policy.json`，审核策略在 `./config/review_policy.json`，分层风险路径在 `./config/review_taxonomy.json`。
+5. 任一门禁失败必须中止流程并提示补齐，禁止“只传截图直接发”。
 
 禁止链接（强制）：
 
@@ -230,6 +237,7 @@ node ./scripts/verify_publish_payload.mjs --in ./data/publish_payload.json --tag
 
 - 不承诺“100% 不被识别为 AI”；目标是显著降低风险。
 - 正文必须有“个人视角 + 具体事实信号（数字/日期/来源提及）”，并规避模板腔。
+- 发布前必须通过 `review_publish_payload` 审核门禁，要求 `decision=pass`，并输出 `risk_path`、证据和 `review_queue` 供复核。
 - `source.evidence_snippet` 与 `source.key_facts` 必填，且能回溯到来源事实。
 - 标签与 `post.real_topics` 都必须来自真实话题池 `data/tag_registry.json`，禁止自造标签。
 - 禁止自动把 `#标签` 拼进正文冒充话题。
@@ -261,6 +269,12 @@ node ./scripts/publish_from_payload.mjs \
   --session xhs \
   --profile ~/.xhs-profile \
   --allow-eval-fallback off \
+  --policy ./config/verify_publish_policy.json \
+  --review on \
+  --review-policy ./config/review_policy.json \
+  --review-taxonomy ./config/review_taxonomy.json \
+  --review-ai-provider auto \
+  --review-require-ai off \
   --tag-registry ./data/tag_registry.json \
   --min-registry-tags 12 \
   --require-source-evidence on \
@@ -373,4 +387,5 @@ node ./scripts/publish_from_payload.mjs \
 - `node ./bin/xhs-skill.mjs cookies normalize --in <jsonPath> --out <outPath>`
 - `node ./bin/xhs-skill.mjs cookies status --in <cookiesJsonPath>`
 - `node ./bin/xhs-skill.mjs cookies to-header --in <cookiesJsonPath>`
-- `node ./scripts/verify_publish_payload.mjs --in <payloadJsonPath> --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on [--mode hot]`
+- `node ./scripts/verify_publish_payload.mjs --in <payloadJsonPath> --policy ./config/verify_publish_policy.json --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on [--mode hot]`
+- `node ./scripts/review_publish_payload.mjs --in <payloadJsonPath> --policy ./config/review_policy.json --taxonomy ./config/review_taxonomy.json --ai-provider auto --require-ai off [--mode hot]`

@@ -1,6 +1,6 @@
 # xhs-skill（小红书创作者中心工作流技能）
 
-一句话：用 `agent-browser-stealth` 负责浏览器操作；用本仓库的 Node.js 小工具负责二维码解码、cookies 归一化、以及“发布前门禁校验”。目标是更省事，但不允许“偷懒式发帖”（只截图就发布）。
+一句话：用 `agent-browser-stealth` 负责浏览器操作；用本仓库的 Node.js 小工具负责二维码解码、cookies 归一化、以及“发布前门禁校验 + 内容审核”。目标是更省事，但不允许“偷懒式发帖”（只截图就发布）。
 
 关键词（SEO / AI 搜索）：小红书、小红书创作者中心、creator.xiaohongshu.com、扫码登录、二维码、QR、cookies 导出、cookies 归一化、发布笔记、热点发布、OpenClaw、AgentSkills、agent-browser-stealth、ClawHub、XHS、Redbook、Xiaohongshu。
 
@@ -69,6 +69,7 @@ node ./skills/xhs-skill/scripts/verify_login.mjs \
 ```bash
 node ./skills/xhs-skill/scripts/verify_publish_payload.mjs \
   --in ./data/publish_payload.json \
+  --policy ./skills/xhs-skill/config/verify_publish_policy.json \
   --tag-registry ./data/tag_registry.json \
   --min-registry-tags 12 \
   --require-source-evidence on \
@@ -77,9 +78,23 @@ node ./skills/xhs-skill/scripts/verify_publish_payload.mjs \
   --json
 ```
 
-3. 仅当返回 `ok=true` 才允许让 `agent-browser-stealth` 进入发布页，填写并点击“发布/提交”。
+3. 内容审核门禁（分层规则 + AI；不通过禁止发布）：
 
-4. 推荐用脚本执行“真人化 + 频率门禁”发布：
+```bash
+node ./skills/xhs-skill/scripts/review_publish_payload.mjs \
+  --in ./data/publish_payload.json \
+  --policy ./skills/xhs-skill/config/review_policy.json \
+  --taxonomy ./skills/xhs-skill/config/review_taxonomy.json \
+  --ai-provider auto \
+  --require-ai off \
+  --mode hot \
+  --json
+```
+
+4. 仅当校验和审核都返回 `ok=true` 才允许让 `agent-browser-stealth` 进入发布页，填写并点击“发布/提交”。
+   校验阈值和词表可在 `skills/xhs-skill/config/verify_publish_policy.json` 调整；审核策略在 `skills/xhs-skill/config/review_policy.json`，分层风险路径在 `skills/xhs-skill/config/review_taxonomy.json`。
+
+5. 推荐用脚本执行“真人化 + 频率门禁”发布：
 
 ```bash
 # 先填充并做读回校验，不提交
@@ -89,6 +104,12 @@ node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
   --session xhs \
   --profile ~/.xhs-profile \
   --allow-eval-fallback off \
+  --policy ./skills/xhs-skill/config/verify_publish_policy.json \
+  --review on \
+  --review-policy ./skills/xhs-skill/config/review_policy.json \
+  --review-taxonomy ./skills/xhs-skill/config/review_taxonomy.json \
+  --review-ai-provider auto \
+  --review-require-ai off \
   --tag-registry ./data/tag_registry.json \
   --min-registry-tags 12 \
   --require-source-evidence on \
@@ -122,6 +143,7 @@ node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
 
 - 不承诺“100% 不被识别为 AI”，目标是显著降低风险。
 - 文案必须通过 `anti_ai` 门禁：需要个人视角、具体事实信号（数字/日期/来源提及），并规避模板腔。
+- 发布前必须通过 `review_publish_payload` 审核门禁（`decision=pass`）；默认是规则 + AI 分层审核，输出 `risk_path`、标准化证据和 `review_queue` 信息。
 - 文案来源必须可追溯：`source.evidence_snippet` + `source.key_facts` 必填。
 - 禁止自动把 `#标签` 直接拼进正文冒充话题。
 - 标签和 `post.real_topics` 都必须来自真实话题池 `data/tag_registry.json`（建议每日更新），禁止自造标签。
@@ -147,6 +169,7 @@ JSON
 
 - 登录：离开 `/login` + 后台页不回跳/不 401 + cookies 含 `web_session`
 - 发布（热点）：标题 8~20 字 + 正文 >= 80 字 + 标签 >= 3 个 + `real_topics >= 3`（两者都必须命中 `tag_registry`）+ 有媒体且非“仅截图” + 来源名/URL/日期 + `source.evidence_snippet` + `source.key_facts` 齐全（`--mode hot` 要求来源日期=当天）+ anti_ai 门禁通过
+- 发布（审核）：`review_publish_payload` 返回 `ok=true` 且 `decision=pass` 才能继续发布；`review/block` 均拦截。
 
 ## 命令速查
 
@@ -161,10 +184,13 @@ node ./skills/xhs-skill/bin/xhs-skill.mjs cookies normalize --in <raw.json> --ou
 node ./skills/xhs-skill/scripts/verify_login.mjs --cookies <xhs.json> --current-url <url> --probe-final-url <url> --json
 
 # 发布门禁（热点）
-node ./skills/xhs-skill/scripts/verify_publish_payload.mjs --in <payload.json> --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --mode hot --json
+node ./skills/xhs-skill/scripts/verify_publish_payload.mjs --in <payload.json> --policy ./skills/xhs-skill/config/verify_publish_policy.json --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --mode hot --json
+
+# 内容审核门禁（分层规则 + AI）
+node ./skills/xhs-skill/scripts/review_publish_payload.mjs --in <payload.json> --policy ./skills/xhs-skill/config/review_policy.json --taxonomy ./skills/xhs-skill/config/review_taxonomy.json --ai-provider auto --require-ai off --mode hot --json
 
 # 带防封策略的发布（先不提交）
-node ./skills/xhs-skill/scripts/publish_from_payload.mjs --payload <payload.json> --mode hot --session xhs --profile ~/.xhs-profile --allow-eval-fallback off --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --json
+node ./skills/xhs-skill/scripts/publish_from_payload.mjs --payload <payload.json> --mode hot --session xhs --profile ~/.xhs-profile --allow-eval-fallback off --policy ./skills/xhs-skill/config/verify_publish_policy.json --review on --review-policy ./skills/xhs-skill/config/review_policy.json --review-taxonomy ./skills/xhs-skill/config/review_taxonomy.json --review-ai-provider auto --review-require-ai off --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --json
 ```
 
 ## 常见问题（只保留最常见）
