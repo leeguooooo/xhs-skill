@@ -8,6 +8,7 @@
 
 - 不引入 Playwright/Selenium/Puppeteer，不写脆弱 DOM selector。
 - 打开/点击/输入/上传/截图/导出 cookies 全部委托 `agent-browser-stealth`（本仓库只提供流程与本地校验工具）。
+- 仓库内不维护“发布编排脚本”；发布动作只允许通过 `agent-browser-stealth` 执行。
 - 禁止使用 `agent-browser`（旧通道已禁用，统一走 `agent-browser-stealth`）。
 - cookies/截图/导出文件只落地到本机 `data/`（已 gitignore）。
 
@@ -94,41 +95,10 @@ node ./skills/xhs-skill/scripts/review_publish_payload.mjs \
 4. 仅当校验和审核都返回 `ok=true` 才允许让 `agent-browser-stealth` 进入发布页，填写并点击“发布/提交”。
    校验阈值和词表可在 `skills/xhs-skill/config/verify_publish_policy.json` 调整；审核策略在 `skills/xhs-skill/config/review_policy.json`，分层风险路径在 `skills/xhs-skill/config/review_taxonomy.json`。
 
-5. 推荐用脚本执行“真人化 + 频率门禁”发布：
-
-```bash
-# 先填充并做读回校验，不提交
-node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
-  --payload ./data/publish_payload.json \
-  --mode hot \
-  --session xhs \
-  --profile ~/.xhs-profile \
-  --allow-eval-fallback off \
-  --policy ./skills/xhs-skill/config/verify_publish_policy.json \
-  --review on \
-  --review-policy ./skills/xhs-skill/config/review_policy.json \
-  --review-taxonomy ./skills/xhs-skill/config/review_taxonomy.json \
-  --review-ai-provider auto \
-  --review-require-ai off \
-  --tag-registry ./data/tag_registry.json \
-  --min-registry-tags 12 \
-  --require-source-evidence on \
-  --strict-anti-ai on \
-  --json
-
-# 先在发布页手动选择至少 3 个真实话题，再确认提交
-node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
-  --payload ./data/publish_payload.json \
-  --mode hot \
-  --session xhs \
-  --profile ~/.xhs-profile \
-  --confirm \
-  --ack-real-topics \
-  --min-interval-minutes 30 \
-  --max-posts-per-day 3 \
-  --rate-log ./data/publish_rate_log.json \
-  --json
-```
+5. 浏览器发布动作只通过 `agent-browser-stealth` 执行（本仓库不提供发布脚本）：
+- 同一 session 串行执行：打开发布页 -> 上传素材 -> 填写标题/正文/标签。
+- 发布前人工确认：在小红书发布页手动选择至少 3 个真实话题，再人工确认最终预览。
+- 发布后闭环校验：回到内容管理页确认标题/缩略图变化，必要时重开编辑页读回检查。
 
 ## 防封要点（必须执行）
 
@@ -147,7 +117,7 @@ node ./skills/xhs-skill/scripts/publish_from_payload.mjs \
 - 文案来源必须可追溯：`source.evidence_snippet` + `source.key_facts` 必填。
 - 禁止自动把 `#标签` 直接拼进正文冒充话题。
 - 标签和 `post.real_topics` 都必须来自真实话题池 `data/tag_registry.json`（建议每日更新），禁止自造标签。
-- 发布前必须在小红书发布页手动选择至少 3 个真实话题，再执行 `--confirm --ack-real-topics`。
+- 发布前必须在小红书发布页手动选择至少 3 个真实话题，再由 `agent-browser-stealth` 执行最终点击发布。
 
 示例：准备真实标签池
 
@@ -189,8 +159,10 @@ node ./skills/xhs-skill/scripts/verify_publish_payload.mjs --in <payload.json> -
 # 内容审核门禁（分层规则 + AI）
 node ./skills/xhs-skill/scripts/review_publish_payload.mjs --in <payload.json> --policy ./skills/xhs-skill/config/review_policy.json --taxonomy ./skills/xhs-skill/config/review_taxonomy.json --ai-provider auto --require-ai off --mode hot --json
 
-# 带防封策略的发布（先不提交）
-node ./skills/xhs-skill/scripts/publish_from_payload.mjs --payload <payload.json> --mode hot --session xhs --profile ~/.xhs-profile --allow-eval-fallback off --policy ./skills/xhs-skill/config/verify_publish_policy.json --review on --review-policy ./skills/xhs-skill/config/review_policy.json --review-taxonomy ./skills/xhs-skill/config/review_taxonomy.json --review-ai-provider auto --review-require-ai off --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on --json
+# 仓库约束检查（防回退）
+npm run check:constraints
+
+# 发布动作：请按 skills/xhs-skill/SKILL.md 的 B 节流程，使用 agent-browser-stealth 执行
 ```
 
 ## 常见问题（只保留最常见）

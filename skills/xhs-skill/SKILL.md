@@ -9,6 +9,7 @@ metadata: {"openclaw":{"emoji":"📌","stage":"workflow"}}
 约束：
 
 - 所有浏览器交互（打开页面/点击/输入/上传/截图/登录/导出）全部委托 `agent-browser-stealth`。
+- 禁止在本仓库编写/维护发布编排脚本（如 `publish_from_payload`）；发布动作必须在会话中由 `agent-browser-stealth` 执行。
 - 禁止使用 `agent-browser`（旧通道禁用，统一使用 `agent-browser-stealth`）。
 - 所有敏感数据（cookies、导出文件、截图）只落地在本机 `data/` 目录，不要粘贴到聊天里。
 
@@ -153,7 +154,7 @@ node ./bin/xhs-skill.mjs cookies to-header --in ./data/xhs_cookies.json
 - 输入优先 `type --delay`（逐字），避免全量瞬时 `fill`。
 
 2. 固定指纹：
-- 运行发布脚本时优先固定 `--profile`，并启用 `--headed`。
+- 运行发布流程时优先固定 `--profile`，并启用 `--headed`。
 - 推荐同一账号长期复用同一个 profile 目录，不要每次新建临时环境。
 
 3. 发布频率门禁：
@@ -241,7 +242,7 @@ node ./scripts/review_publish_payload.mjs --in ./data/publish_payload.json --pol
 - `source.evidence_snippet` 与 `source.key_facts` 必填，且能回溯到来源事实。
 - 标签与 `post.real_topics` 都必须来自真实话题池 `data/tag_registry.json`，禁止自造标签。
 - 禁止自动把 `#标签` 拼进正文冒充话题。
-- 发布前必须在小红书发布页手动选择至少 3 个真实话题，然后再执行 `--confirm --ack-real-topics`。
+- 发布前必须在小红书发布页手动选择至少 3 个真实话题，然后由 `agent-browser-stealth` 执行最终点击发布。
 
 示例：准备真实标签池（建议每天更新）：
 
@@ -259,48 +260,18 @@ cat > ./data/tag_registry.json <<'JSON'
 JSON
 ```
 
-一条命令发布（推荐，避免临场写 selector/JS）：
+发布执行方式（唯一）：
 
-```bash
-# 默认只把内容填好并做读回校验，不会点“发布”
-node ./scripts/publish_from_payload.mjs \
-  --payload ./data/publish_payload.json \
-  --mode hot \
-  --session xhs \
-  --profile ~/.xhs-profile \
-  --allow-eval-fallback off \
-  --policy ./config/verify_publish_policy.json \
-  --review on \
-  --review-policy ./config/review_policy.json \
-  --review-taxonomy ./config/review_taxonomy.json \
-  --review-ai-provider auto \
-  --review-require-ai off \
-  --tag-registry ./data/tag_registry.json \
-  --min-registry-tags 12 \
-  --require-source-evidence on \
-  --strict-anti-ai on \
-  --json
-
-# 先手动选择至少 3 个真实话题，再 --confirm 真正提交（会执行频率门禁）
-node ./scripts/publish_from_payload.mjs \
-  --payload ./data/publish_payload.json \
-  --mode hot \
-  --session xhs \
-  --profile ~/.xhs-profile \
-  --confirm \
-  --ack-real-topics \
-  --min-interval-minutes 30 \
-  --max-posts-per-day 3 \
-  --rate-log ./data/publish_rate_log.json \
-  --json
-```
+- 本仓库只负责“数据准备 + 门禁校验 + 审核校验”；不再提供发布自动化脚本。
+- 浏览器动作必须由 `agent-browser-stealth` 串行执行：打开发布页 -> 上传素材 -> 填写标题/正文/标签 -> 手动选择真实话题 -> 人工确认预览 -> 点击发布。
+- 若任一门禁失败（`verify/review` 非 `ok=true`），必须停止在“发布前”，禁止继续点击提交。
 
 发布可靠性 Checklist（照这个执行，避免“看似发了其实没发/字段没落库”）：
 
 - 正文换行：写入编辑器前把 `\\n` 规范化为真实换行（`text.replaceAll("\\\\n", "\n")`），填完立刻读回校验正文 `innerText` 不包含字面量 `\\n`。
 - 标题/正文/标签写入后都要读回校验：标题是否存在且 `<= 20`；正文是否非空且长度达标；标签是否至少 3 个且都以 `#` 开头、并来自 `tag_registry`。
 - 读回门禁里把 `post.real_topics` 一并校验（>=3，且都命中 `tag_registry`），避免“假话题”。
-- ProseMirror：正文必须定位到 `.ProseMirror[contenteditable=true]`（不要按普通 input/textarea 假设），并触发必要的 `input/change`。
+- 正文编辑区可能不是普通 input/textarea；必须先 `snapshot -i` 确认可编辑区域，再写入并读回校验。
 - 发布按钮：页面可能有多个“发布”入口，必须点击“可见 + enabled + 文案严格匹配”的主按钮；点击后用 URL/页面状态确认已跳转到成功/管理页。
 - 图片重传：若需要替换，先点“清空”并在弹窗选择“重新上传”；上传后等待缩略图数量稳定再继续。
 - 图片尺寸：截图类 `1280x720` 会让预览很差；发布前用门禁校验图片为竖版 3:4（推荐 `1242x1660`）。
@@ -338,10 +309,10 @@ node ./scripts/publish_from_payload.mjs \
 - 标签至少 3 个，且都以 `#` 开头
 - `post.real_topics` 至少 3 个，且与标签都必须命中 `data/tag_registry.json`（真实话题池）
 - 禁止“仅截图素材”直接发布（如只含 `screenshot/login_qr` 等截图文件）
-- 正文编辑区按 `ProseMirror` 处理，不要按普通 input 假设
+- 正文编辑区不要按普通 input 假设，先 `snapshot -i` 再定位可编辑区
 - 每次点击/填写前先刷新 ref，避免 ref 漂移误操作
 6. 点击“发布/提交”前暂停，要求用户确认最终预览。
-6.1 发布前手动选择至少 3 个真实话题，再用 `--confirm --ack-real-topics` 提交。
+6.1 发布前手动选择至少 3 个真实话题，再由 `agent-browser-stealth` 点击提交。
 7. 发布后记录结果页 URL；失败时截图并记录错误文案。
 
 发布结果输出契约（JSON）：

@@ -9,7 +9,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "lint": "node -c src/cli.mjs && node -c bin/xhs-skill.mjs"
+    "lint": "node -c src/cli.mjs && node -c bin/xhs-skill.mjs && npm run check:constraints",
+    "check:constraints": "node ./scripts/check_repo_constraints.mjs"
   },
   "engines": {
     "node": ">=18"

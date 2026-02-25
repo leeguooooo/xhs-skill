@@ -13,6 +13,7 @@ This repository is **skill-first**.
 - No MCP server implementation in this repo.
 - No Playwright/Selenium/Puppeteer dependencies.
 - No fragile DOM selectors hard-coded in this repo.
+- No in-repo publish orchestration scripts (for example `publish_from_payload`).
 - Do not use `agent-browser`; use `agent-browser-stealth` only.
 - Prefer Node.js for any local tooling (CLI, cookie normalization, QR decode).
 
