@@ -360,3 +360,14 @@ JSON
 - `node ./bin/xhs-skill.mjs cookies to-header --in <cookiesJsonPath>`
 - `node ./scripts/verify_publish_payload.mjs --in <payloadJsonPath> --policy ./config/verify_publish_policy.json --tag-registry ./data/tag_registry.json --min-registry-tags 12 --require-source-evidence on --strict-anti-ai on [--mode hot]`
 - `node ./scripts/review_publish_payload.mjs --in <payloadJsonPath> --policy ./config/review_policy.json --taxonomy ./config/review_taxonomy.json --ai-provider auto --require-ai off [--mode hot]`
+
+## D. 轻量发版流程（维护者）
+
+1. 先跑本地门禁：
+- `npm run check:constraints`
+- `npm test`
+2. 查看改动只包含预期文件：`git status --short`
+3. 用中文 Conventional Commit 提交（示例）：
+- `docs(skill): 补充发版前快速自检清单`
+4. 发布到 ClawHub（patch）：
+- `clawhub sync --all --bump patch --changelog "docs: 补充发版前快速自检清单"`

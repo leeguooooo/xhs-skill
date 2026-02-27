@@ -165,6 +165,20 @@ npm run check:constraints
 # 发布动作：请按 skills/xhs-skill/SKILL.md 的 B 节流程，使用 agent-browser-stealth 执行
 ```
 
+## 发版前 60 秒自检（维护者）
+
+```bash
+# 1) 基础检查
+npm run check:constraints
+npm test
+
+# 2) 确认变更
+git status --short
+
+# 3) 发布到 ClawHub（patch）
+clawhub sync --all --bump patch --changelog "docs: 补充发版前快速自检清单"
+```
+
 ## 常见问题（只保留最常见）
 
 - `No QR code detected in PNG`：没切到扫码视图或二维码太小，放大二维码区域后重截（必须 PNG）。
