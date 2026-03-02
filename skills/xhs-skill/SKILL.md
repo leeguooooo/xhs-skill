@@ -263,12 +263,40 @@ JSON
 发布执行方式（唯一）：
 
 - 本仓库只负责“数据准备 + 门禁校验 + 审核校验”；不再提供发布自动化脚本。
-- 浏览器动作必须由 `agent-browser-stealth` 串行执行：打开发布页 -> 上传素材 -> 填写标题/正文/标签 -> 手动选择真实话题 -> 人工确认预览 -> 点击发布。
+- 浏览器动作必须由 `agent-browser-stealth` 串行执行：预检 -> 填充 -> 读回校验 -> 发布 -> 回查。
 - 若任一门禁失败（`verify/review` 非 `ok=true`），必须停止在“发布前”，禁止继续点击提交。
+
+P0：发布编排器（流程编排，不是仓库脚本）：
+
+1. 预检：
+- 入口路由固定从 `https://creator.xiaohongshu.com/publish/publish` 进入；禁止把 `/creator/*` 作为首入口。
+- 若被跳到 `https://creator.xiaohongshu.com/new/home`（“你访问的页面不见了”），立即回到 `/publish/publish` 重试。
+- 进入发布页后先切到“图文”模式，再上传图片；未切图文不进入后续步骤。
+2. 填充：
+- 写标题、正文、标签/话题、可见性。
+3. 读回校验：
+- 校验通过才允许点击发布。
+4. 发布：
+- 点击发布后等待页面状态稳定并记录 URL。
+5. 回查：
+- 先检查 URL 参数包含 `published=true`；
+- 再从页面菜单进入“笔记管理”做二次确认，不允许硬编码管理页直链回查。
+
+P0：路由与状态稳定性（强制）：
+
+- 稳定入口只认 `/publish/publish`；其他页面只作为中转，不作为成功判定依据。
+- “发布页可用”不等于“管理页可用”：发布后必须菜单跳转二次查验。
+- 若发布页元素未出现，先检查是否处于“图文模式 + 图片已上传”状态，再判断失败。
+
+P0：选择器双通道（强制）：
+
+- 第一通道（默认）：语义定位（`placeholder + role + 可见性 + 附近文案`）。
+- 第二通道（兜底）：DOM 结构线索定位（例如标题输入框 placeholder 语义 + 正文编辑器 `tiptap/ProseMirror` 语义类名）。
+- 禁止只依赖 `snapshot ref` 或 `@e1/@e2` 序号；每个关键动作前后都要 `snapshot -i` 二次确认。
+- DOM 兜底只作为会话级临时手段，命中后仍需“读回校验”确认字段正确，不把脆弱 selector 当硬依赖。
 
 P0：写入可靠性（强制）：
 
-- 标题/正文定位不能依赖 `@e1/@e2` 序号；必须使用 `placeholder + role + 可见性` 组合定位，并在写入前后各执行一次 `snapshot -i` 二次确认。
 - 标题字段必须满足：单行、可见、可编辑、placeholder 命中“标题”语义。
 - 正文字段必须满足：多行或 `contenteditable`、可见、可编辑、placeholder/附近文本命中“正文/内容”语义。
 - 写入后必须做“双向读回校验”：同时读取标题和正文，计算 `title_len` 与 `body_len`。
@@ -298,6 +326,21 @@ sips -c 1660 1242 ./data/assets/in.png --out ./data/assets/out_1242x1660.png
 ```
 
 - 上传后必须在发布页确认缩略图比例正常；若拉伸/裁切异常，先替换素材再继续。
+
+P0：发布前硬校验（强制）：
+
+- 标题长度 `<= 20`。
+- 正文长度 `>= 80`。
+- 已上传图片（图文至少 1 张，且可见缩略图）。
+- 已选择真实话题 `>= 3`（通过小红书话题交互选择，不是正文拼接）。
+- 标题/正文/标签无链接词（`http`、`https`、`www.`、域名形态）。
+- 任一不满足直接中止，不允许“先发再修”。
+
+P0：发布后双重确认（强制）：
+
+1. 第一重：发布后 URL 含 `published=true`。
+2. 第二重：从发布页菜单进入“笔记管理”，确认列表出现新笔记（标题前缀 + 时间窗口）。
+3. 管理页若被重定向或不可达，判定“回查未完成”，记录 `run_log` 并提示人工复核。
 
 P1：热点到 payload 半自动（无脚本版）：
 
@@ -333,7 +376,13 @@ P1：标签/话题池维护（无脚本版）：
 P1：流程可观测（无脚本版）：
 
 - 每次运行结束都产出 `data/run_log/<YYYY-MM-DD_HH-mm-ss>.json`（手工写文件即可，不新增脚本）。
-- 建议字段：`steps`、`durations_ms`、`failed_step`、`error_message`、`screenshots`、`result_url`、`draft_check`、`editor_check`。
+- 建议字段：`steps`、`durations_ms`、`failed_step`、`error_message`、`screenshots`、`result_url`、`draft_check`、`editor_check`、`route_check`、`post_publish_check`。
+
+P1：固定模板（强烈建议）：
+
+- 固定标题模板：`[主题词]+[观点/结论]`，目标 12~18 字，留 2~8 字缓冲避免超长。
+- 固定正文模板：`开场观点 -> 事实1 -> 事实2 -> 个人判断 -> 行动建议`，默认 >120 字。
+- 固定标签与话题池：仅从 `data/tag_registry.json` 选取，避免临场造词导致门禁失败。
 
 P2：回归用例（每日 smoke，手工执行）：
 
@@ -346,13 +395,14 @@ P2：回归用例（每日 smoke，手工执行）：
 
 1. 确保已登录（先完成上面的 A，或已有有效登录态）。
 2. 准备并校验 `data/publish_payload.json`（必须 `ok=true`）。
-3. 打开发布页面（允许路径变化），先 `snapshot -i` 获取最新结构。
-4. 上传媒体（图文多图/视频文件与封面），确认比例与数量。
-5. 用“placeholder + role + 可见性”定位标题与正文，写入后执行“双向读回校验 + 错位自愈”。
+3. 打开 `https://creator.xiaohongshu.com/publish/publish`，先 `snapshot -i` 获取最新结构。
+4. 切图文模式并上传媒体（确认缩略图比例与数量）。
+5. 用“语义定位优先 + DOM 兜底”填写标题与正文，写入后执行“双向读回校验 + 错位自愈”。
 6. 通过小红书标签交互选择标签与真实话题（至少 3 个），不要把标签写进标题。
-7. 点击“暂存离开”后执行草稿闭环校验（toast + 列表新条目 + 读回）。
-8. 点击“发布/提交”前暂停，要求用户确认最终预览。
-9. 发布后记录结果页 URL；失败时截图并记录错误文案。
+7. 执行发布前硬校验（标题、正文、图片、话题、无链接词）。
+8. 点击“暂存离开”并执行草稿闭环校验（toast + 列表新条目 + 读回）。
+9. 点击“发布/提交”前暂停，要求用户确认最终预览。
+10. 发布后执行双重确认（`published=true` + 菜单进入笔记管理二次查验），并写入 `run_log`。
 
 发布结果输出契约（JSON）：
 
@@ -368,6 +418,9 @@ P2：回归用例（每日 smoke，手工执行）：
     "real_topic_count": 3,
     "editor_alignment_ok": true,
     "draft_saved_ok": true,
+    "publish_precheck_ok": true,
+    "published_param_ok": true,
+    "manage_menu_check_ok": true,
     "topic": "今日热点：xxxx",
     "source_date": "2026-02-12"
   },
@@ -380,7 +433,7 @@ P2：回归用例（每日 smoke，手工执行）：
 }
 ```
 
-发布失败时 `ok=false`，并返回 `error_message`、`error_screenshot` 路径和未通过的 `missing_checks`。
+发布失败时 `ok=false`，并返回 `error_message`、`error_screenshot` 路径、未通过的 `missing_checks` 与 `failed_stage`（`preflight/fill/readback/publish/postcheck`）。
 
 ## C. 导出创作者中心数据（CSV/XLSX 或截图）
 
